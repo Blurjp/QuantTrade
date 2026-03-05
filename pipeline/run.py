@@ -201,7 +201,15 @@ def run_single_day(
     print(f"\nStep 5: Tracklet linking...")
     if len(daily_detections) > 0:
         try:
-            tracklets = link_detections(daily_detections)
+            # Use tighter parameters for ship tracklets:
+            # Ships move ~15-20 knots = In 6 hours: ~110-220 km
+            # Use 5km threshold for same-day linking
+            tracklets = link_detections(
+                daily_detections,
+                max_distance_km=5.0,  # 5km - reasonable ship movement in 6 hours
+                max_time_gap_hours=6.0,  # 6 hours between scenes
+                min_tracklet_length=2
+            )
             save_tracklets(tracklets, str(date_dir / "tracklets"))
             report["tracklets"] = len(tracklets)
         except Exception as e:

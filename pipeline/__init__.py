@@ -9,7 +9,7 @@ __version__ = "0.1.0"
 __author__ = "blurjp"
 
 from pipeline.manifest import run_manifest_builder
-from pipeline.loader import load_scenes
+from pipeline.loader import load_scenes_from_manifest, iter_scenes, compute_coverage_score
 from pipeline.preprocess import preprocess_scene
 from pipeline.detection import run_detection_pipeline
 from pipeline.tracking import link_detections
@@ -19,7 +19,9 @@ from pipeline.calibration import fit_bias_model, apply_bias_correction
 
 __all__ = [
     "run_manifest_builder",
-    "load_scenes",
+    "load_scenes_from_manifest",
+    "iter_scenes",
+    "compute_coverage_score",
     "preprocess_scene",
     "run_detection_pipeline",
     "link_detections",

@@ -3,76 +3,54 @@ SAR Preprocessing
 
 Minimal preprocessing for Sentinel-1 SAR data:
 - Water mask (restrict to water pixels)
-- Intensity normalization
-- Metadata preservation
+- QC metrics computation
 """
 
 import numpy as np
 import xarray as xr
 from typing import Optional, Tuple
 
+
 def apply_water_mask(
     ds: xr.Dataset,
-    land_threshold_db: float = -10.0
+    land_threshold_db: float = 35.0
 ) -> xr.Dataset:
     """
     Apply water mask based on backscatter threshold.
 
-    Water typically has lower backscatter than land.
+    Land typically has higher backscatter than water.
+    For Sentinel-1 IW GRD, water is typically < 20-25 dB.
 
     Args:
         ds: Input dataset
-        land_threshold_db: Threshold in dB (below = likely water)
+        land_threshold_db: Threshold in dB (above = likely land, will be masked)
 
     Returns:
-        Masked dataset
+        Masked dataset with land pixels set to NaN
     """
-    # Convert to dB if needed
-    if ds["vv"].max() > 0:
-        vv_db = 10 * np.log10(ds["vv"].clip(min=1e-10))
+    if "vv" not in ds:
+        return ds
+
+    # Convert to dB - handle dask arrays by computing first
+    vv_data = ds["vv"]
+    if hasattr(vv_data, 'compute'):
+        vv_data = vv_data.compute()
+
+    # Convert to dB if needed (positive values > 1 = linear scale)
+    if float(vv_data.max()) > 1:
+        vv_db = 10 * np.log10(np.clip(vv_data.values, 1e-10, None))
     else:
-        vv_db = ds["vv"]
+        vv_db = vv_data.values
 
-    # Create water mask
-    water_mask = vv_db < land_threshold_db
+    # Create water mask (keep pixels below threshold - these are water)
+    # Mask out land (high backscatter)
+    land_mask = vv_db > land_threshold_db
 
-    # Apply mask
-    ds_masked = ds.where(water_mask)
+    # Apply mask (set land to NaN)
+    ds_masked = ds.where(~land_mask)
 
     return ds_masked
 
-def normalize_intensity(
-    ds: xr.Dataset,
-    method: str = "percentile"
-) -> xr.Dataset:
-    """
-    Normalize SAR intensity values.
-
-    Args:
-        ds: Input dataset
-        method: Normalization method (percentile, minmax)
-
-    Returns:
-        Normalized dataset
-    """
-    if method == "percentile":
-        # Percentile-based normalization (robust)
-        p2 = ds["vv"].quantile(0.02)
-        p98 = ds["vv"].quantile(0.98)
-
-        ds_norm = (ds["vv"] - p2) / (p98 - p2)
-        ds_norm = ds_norm.clip(0, 1)
-
-    elif method == "minmax":
-        # Min-max normalization
-        vmin = ds["vv"].min()
-        vmax = ds["vv"].max()
-
-        ds_norm = (ds["vv"] - vmin) / (vmax - vmin)
-
-    ds["vv_normalized"] = ds_norm
-
-    return ds
 
 def compute_qc_metrics(ds: xr.Dataset) -> dict:
     """
@@ -88,27 +66,43 @@ def compute_qc_metrics(ds: xr.Dataset) -> dict:
 
     # Backscatter statistics
     if "vv" in ds:
-        metrics["vv_mean"] = float(ds["vv"].mean())
-        metrics["vv_median"] = float(ds["vv"].median())
-        metrics["vv_std"] = float(ds["vv"].std())
+        vv_data = ds["vv"]
+        if hasattr(vv_data, 'compute'):
+            vv_data = vv_data.compute()
+        vv_values = vv_data.values
+
+        metrics["vv_mean"] = float(np.nanmean(vv_values))
+        metrics["vv_median"] = float(np.nanmedian(vv_values))
+        metrics["vv_std"] = float(np.nanstd(vv_values))
 
     if "vh" in ds:
-        metrics["vh_mean"] = float(ds["vh"].mean())
-        metrics["vh_median"] = float(ds["vh"].median())
-        metrics["vh_std"] = float(ds["vh"].std())
+        vh_data = ds["vh"]
+        if hasattr(vh_data, 'compute'):
+            vh_data = vh_data.compute()
+        vh_values = vh_data.values
+
+        metrics["vh_mean"] = float(np.nanmean(vh_values))
+        metrics["vh_median"] = float(np.nanmedian(vh_values))
+        metrics["vh_std"] = float(np.nanstd(vh_values))
 
     # Coverage
     if "vv" in ds:
-        valid_pixels = ds["vv"].notnull().sum()
-        total_pixels = ds["vv"].size
-        metrics["coverage_fraction"] = float(valid_pixels / total_pixels)
+        vv_data = ds["vv"]
+        if hasattr(vv_data, 'compute'):
+            vv_data = vv_data.compute()
+        vv_values = vv_data.values
+
+        valid_pixels = np.sum(~np.isnan(vv_values))
+        total_pixels = vv_values.size
+        metrics["coverage_fraction"] = float(valid_pixels / total_pixels) if total_pixels > 0 else 0.0
 
     return metrics
+
 
 def preprocess_scene(
     ds: xr.Dataset,
     apply_mask: bool = True,
-    normalize: bool = True
+    compute_qc: bool = True
 ) -> Tuple[xr.Dataset, dict]:
     """
     Full preprocessing pipeline for a single scene.
@@ -116,7 +110,7 @@ def preprocess_scene(
     Args:
         ds: Input dataset
         apply_mask: Apply water mask
-        normalize: Normalize intensity
+        compute_qc: Compute QC metrics
 
     Returns:
         Preprocessed dataset and QC metrics
@@ -124,13 +118,11 @@ def preprocess_scene(
     if apply_mask:
         ds = apply_water_mask(ds)
 
-    if normalize:
-        ds = normalize_intensity(ds)
-
-    # Compute QC metrics
-    qc = compute_qc_metrics(ds)
+    if compute_qc:
+        qc = compute_qc_metrics(ds)
 
     return ds, qc
+
 
 if __name__ == "__main__":
     print("SAR Preprocessing module")

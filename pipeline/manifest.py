@@ -12,6 +12,7 @@ from typing import Optional, List
 import geopandas as gpd
 import pandas as pd
 from pystac_client import Client
+from pystac import Item, ItemCollection
 
 def load_aoi(config_path: str = "configs/aoi_hormuz.geojson") -> dict:
     """Load AOI polygon from GeoJSON config."""
@@ -44,20 +45,26 @@ def search_sentinel1(
     # Connect to STAC
     client = Client.open(stac_url)
 
-    # Search
+    # Search - simplified query to avoid 500 errors from Planetary Computer
     search = client.search(
         collections=[collection],
         intersects=aoi_geom,
-        datetime=f"{start_date.isoformat()}/{end_date.isoformat()}",
-        query={
-            "sar:instrument_mode": {"eq": "IW"},
-            "sar:polarizations": {"contains": "VV"}
-        }
+        datetime=f"{start_date.isoformat()}/{end_date.isoformat()}"
     )
 
     items = list(search.items())
-    print(f"Found {len(items)} Sentinel-1 scenes")
-    return items
+
+    # Filter for IW mode and VV polarization client-side
+    filtered_items = []
+    for item in items:
+        props = item.properties
+        mode = props.get("sar:instrument_mode", "")
+        pols = props.get("sar:polarizations", [])
+        if mode == "IW" and "VV" in pols:
+            filtered_items.append(item)
+
+    print(f"Found {len(items)} Sentinel-1 scenes, {len(filtered_items)} with IW mode and VV polarization")
+    return filtered_items
 
 def build_manifest(
     items: List[dict],
@@ -105,12 +112,69 @@ def build_manifest(
 
     return df
 
+
+def save_stac_items(
+    items: List[Item],
+    output_path: str = "outputs/manifests"
+) -> Path:
+    """
+    Save STAC items as NDJSON for later reconstruction.
+
+    This is critical for loading with odc-stac, which needs full STAC items
+    with asset hrefs (not just metadata).
+
+    Args:
+        items: List of pystac Items
+        output_path: Directory to save items
+
+    Returns:
+        Path to saved NDJSON file
+    """
+    output_dir = Path(output_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine date from first item
+    if len(items) > 0:
+        date_str = items[0].datetime.strftime("%Y-%m-%d")
+    else:
+        date_str = "unknown"
+
+    output_file = output_dir / f"{date_str}_items.ndjson"
+
+    with open(output_file, "w") as f:
+        for item in items:
+            f.write(json.dumps(item.to_dict()) + "\n")
+
+    print(f"Saved {len(items)} STAC items to {output_file}")
+    return output_file
+
+
+def load_stac_items(items_path: str) -> List[Item]:
+    """
+    Load STAC items from NDJSON file.
+
+    Args:
+        items_path: Path to NDJSON file
+
+    Returns:
+        List of pystac Items
+    """
+    items = []
+    with open(items_path, "r") as f:
+        for line in f:
+            if line.strip():
+                item_dict = json.loads(line)
+                items.append(Item.from_dict(item_dict))
+
+    print(f"Loaded {len(items)} STAC items from {items_path}")
+    return items
+
 def run_manifest_builder(
     start_date: date,
     end_date: date,
     aoi_path: str = "configs/aoi_hormuz.geojson",
     output_path: str = "outputs/manifests"
-) -> pd.DataFrame:
+) -> tuple:
     """
     Full manifest builder pipeline.
 
@@ -121,7 +185,7 @@ def run_manifest_builder(
         output_path: Directory to save manifests
 
     Returns:
-        Manifest DataFrame
+        Tuple of (Manifest DataFrame, Path to STAC items NDJSON)
     """
     # Load AOI
     aoi = load_aoi(aoi_path)
@@ -129,10 +193,13 @@ def run_manifest_builder(
     # Search STAC
     items = search_sentinel1(aoi, start_date, end_date)
 
-    # Build manifest
+    # Build manifest (parquet for metadata queries)
     manifest = build_manifest(items, output_path)
 
-    return manifest
+    # Save full STAC items (NDJSON for loading with odc-stac)
+    items_path = save_stac_items(items, output_path)
+
+    return manifest, items_path
 
 if __name__ == "__main__":
     import argparse
@@ -145,7 +212,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    manifest = run_manifest_builder(
+    manifest, items_path = run_manifest_builder(
         date.fromisoformat(args.start),
         date.fromisoformat(args.end),
         args.aoi,
@@ -155,3 +222,4 @@ if __name__ == "__main__":
     print(f"\nManifest summary:")
     print(manifest.head())
     print(f"\nTotal scenes: {len(manifest)}")
+    print(f"STAC items saved to: {items_path}")

@@ -85,13 +85,23 @@ def aggregate_daily_metrics(
     # Parse datetime
     crossings_df["date"] = pd.to_datetime(crossings_df["datetime"]).dt.date
 
+    # Check if this is fallback format (estimated_gc_in/out) or direction column
+    is_fallback = "estimated_gc_in" in crossings_df.columns and "direction" not in crossings_df.columns
+
     # Group by date
     daily = []
 
     for date_val, group in crossings_df.groupby("date"):
-        # Count crossings by direction
-        gc_in = len(group[group["direction"] == "in"])
-        gc_out = len(group[group["direction"] == "out"])
+        if is_fallback:
+            # Fallback format: use estimated totals directly
+            gc_in = int(group["estimated_gc_in"].iloc[0]) if len(group) > 0 else 0
+            gc_out = int(group["estimated_gc_out"].iloc[0]) if len(group) > 0 else 0
+            swt_in = group["area_km2"].sum() if "area_km2" in group.columns else gc_in * 0
+            swt_out = group["area_km2"].sum() if "area_km2" in group.columns else gc_out * 0
+        else:
+            # Standard format: count individual crossings by direction
+            gc_in = len(group[group["direction"] == "in"])
+            gc_out = len(group[group["direction"] == "out"])
 
         # Size-weighted throughput (use bbox area as proxy)
         swt_in = group[group["direction"] == "in"]["area_km2"].sum() if "area_km2" in group.columns else gc_in

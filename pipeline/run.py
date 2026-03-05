@@ -25,7 +25,7 @@ from pipeline.loader import (
 from pipeline.preprocess import preprocess_scene
 from pipeline.detection import run_detection_pipeline
 from pipeline.tracking import link_detections, save_tracklets
-from pipeline.crossings import load_gate_line, infer_crossings, save_crossings
+from pipeline.crossings import load_gate_line, infer_crossings, save_crossings, fallback_scene_crossings
 from pipeline.metrics import aggregate_daily_metrics, save_metrics
 
 
@@ -213,7 +213,21 @@ def run_single_day(
     # Step 6: Gate crossing inference
     print(f"\nStep 6: Gate crossing inference...")
     gate_line = load_gate_line(gate_path)
-    report["crossings"] = {"in": 0, "out": 0}
+
+    # Use fallback scene crossings for same-day data
+    if len(daily_detections) > 0:
+        try:
+            crossings = fallback_scene_crossings(daily_detections, gate_line)
+            save_crossings(crossings, str(date_dir / "crossings"))
+            # Count crossings (fallback format has estimated_gc_in/out)
+            if len(crossings) > 0:
+                report["crossings"] = {
+                    "in": int(crossings["estimated_gc_in"].iloc[0]) if "estimated_gc_in" in crossings.columns else 0,
+                    "out": int(crossings["estimated_gc_out"].iloc[0]) if "estimated_gc_out" in crossings.columns else 0
+                }
+        except Exception as e:
+            print(f"  Gate crossing inference failed: {e}")
+            report["errors"].append(f"Gate crossing: {str(e)}")
 
     # Step 7: Finalize report
     report["status"] = "completed" if not report["errors"] else "completed_with_errors"

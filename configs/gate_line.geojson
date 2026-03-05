@@ -1,0 +1,14 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Hormuz Gate Line",
+    "description": "Crossing detection line across main channel"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [56.5, 26.9],
+      [56.5, 27.1]
+    ]
+  }
+}

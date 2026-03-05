@@ -1,0 +1,25 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Strait of Hormuz - Primary Corridor",
+        "description": "AOI covering main shipping channel through Hormuz"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [56.2, 26.8],
+            [57.0, 26.8],
+            [57.0, 27.2],
+            [56.6, 27.5],
+            [56.2, 27.3],
+            [56.2, 26.8]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -29,11 +29,90 @@ from pipeline.crossings import load_gate_line, infer_crossings, save_crossings, 
 from pipeline.metrics import aggregate_daily_metrics, save_metrics
 
 
+def run_calibration_step(
+    output_base: str,
+    ais_path: str,
+    gate_path: str,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None
+) -> dict:
+    """
+    Run calibration step against AIS data.
+
+    Args:
+        output_base: Base output directory
+        ais_path: Path to AIS Parquet data
+        gate_path: Path to gate line GeoJSON
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+
+    Returns:
+        Calibration results dict
+    """
+    from pipeline.calibration import run_calibration_workflow
+
+    # Find satellite metrics
+    metrics_path = Path(output_base) / "metrics" / "daily.parquet"
+
+    if not metrics_path.exists():
+        # Try to aggregate from daily crossings
+        print("Aggregating metrics from daily crossings...")
+        all_metrics = []
+
+        for day_dir in sorted(Path(output_base).iterdir()):
+            if day_dir.is_dir() and day_dir.name.startswith("20"):
+                crossings_file = day_dir / "crossings" / "crossings.parquet"
+                if crossings_file.exists():
+                    crossings = pd.read_parquet(crossings_file)
+                    if len(crossings) > 0:
+                        # Get manifest for coverage
+                        manifest_path = day_dir / "manifests" / "manifest.parquet"
+                        manifest = pd.read_parquet(manifest_path) if manifest_path.exists() else None
+
+                        aoi = load_aoi()
+                        aoi_geom = aoi["features"][0]["geometry"]
+
+                        metrics = aggregate_daily_metrics(crossings, manifest, aoi_geom)
+                        all_metrics.append(metrics)
+
+        if all_metrics:
+            combined = pd.concat(all_metrics, ignore_index=True)
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            combined.to_parquet(metrics_path, index=False)
+            print(f"Saved metrics to {metrics_path}")
+        else:
+            print("No metrics found for calibration")
+            return {}
+
+    # Load gate coordinates
+    with open(gate_path) as f:
+        gate_data = json.load(f)
+
+    # Handle both Feature and FeatureCollection formats
+    if gate_data['type'] == 'FeatureCollection':
+        gate_coords = gate_data['features'][0]['geometry']['coordinates']
+    elif gate_data['type'] == 'Feature':
+        gate_coords = gate_data['geometry']['coordinates']
+    else:
+        gate_coords = gate_data['coordinates']
+
+    # Run calibration
+    return run_calibration_workflow(
+        sat_metrics_path=str(metrics_path),
+        ais_data_path=ais_path,
+        gate_coords=gate_coords,
+        output_path=str(Path(output_base) / "calibration"),
+        start_date=start_date,
+        end_date=end_date
+    )
+
+
 def run_single_day(
     target_date: date,
     aoi_path: str = "configs/aoi_hormuz.geojson",
     gate_path: str = "configs/gate_line.geojson",
-    output_base: str = "outputs"
+    output_base: str = "outputs",
+    return_detections: bool = False
 ) -> dict:
     """
     Run pipeline for a single day.
@@ -50,9 +129,10 @@ def run_single_day(
         aoi_path: Path to AOI GeoJSON
         gate_path: Path to gate line GeoJSON
         output_base: Base output directory
+        return_detections: If True, return detections DataFrame in report
 
     Returns:
-        Run report dict
+        Run report dict (with 'detections_df' key if return_detections=True)
     """
     start_time = time.time()
     report = {
@@ -253,6 +333,9 @@ def run_single_day(
         print(f"Errors: {len(report['errors'])}")
     print(f"{'='*60}\n")
 
+    if return_detections:
+        report["detections_df"] = daily_detections
+
     return report
 
 
@@ -269,12 +352,17 @@ def run_pipeline(
     end_date: date,
     aoi_path: str = "configs/aoi_hormuz.geojson",
     gate_path: str = "configs/gate_line.geojson",
-    output_base: str = "outputs"
+    output_base: str = "outputs",
+    ais_path: Optional[str] = None
 ):
     """
-    Run full pipeline for date range.
+    Run full pipeline for date range with multi-day tracklet linking.
 
-    For multi-day ranges, runs each day independently.
+    This function:
+    1. Processes each day independently (detection, daily tracklets)
+    2. Collects all detections across days
+    3. Runs global tracklet linking across all days
+    4. Runs gate crossing inference on global tracklets
 
     Args:
         start_date: Start date
@@ -290,20 +378,87 @@ def run_pipeline(
 
     current_date = start_date
     reports = []
+    all_detections = []
 
+    # Step 1: Process each day and collect detections
     while current_date <= end_date:
         report = run_single_day(
             target_date=current_date,
             aoi_path=aoi_path,
             gate_path=gate_path,
-            output_base=output_base
+            output_base=output_base,
+            return_detections=True  # Collect detections for global linking
         )
         reports.append(report)
+
+        # Collect detections if available
+        if "detections_df" in report and len(report["detections_df"]) > 0:
+            all_detections.append(report["detections_df"])
+            print(f"  Collected {len(report['detections_df'])} detections from {current_date}")
+
         current_date = date(
             current_date.year,
             current_date.month,
             current_date.day + 1
         )
+
+    # Step 2: Global tracklet linking across all days
+    print(f"\n{'='*60}")
+    print("Step 2: Global Tracklet Linking (Multi-Day)")
+    print(f"{'='*60}\n")
+
+    if all_detections:
+        combined_detections = pd.concat(all_detections, ignore_index=True)
+        print(f"Total detections across all days: {len(combined_detections)}")
+
+        # Run global tracklet linking with parameters suitable for multi-day tracking
+        # Ships can move significant distances over multiple days
+        try:
+            global_tracklets = link_detections(
+                combined_detections,
+                max_distance_km=50.0,  # 50km - allows for multi-day ship movement
+                max_time_gap_hours=72.0,  # 72 hours - up to 3 days between observations
+                min_tracklet_length=2
+            )
+
+            # Save global tracklets
+            global_output_dir = Path(output_base) / "global_tracklets"
+            global_output_dir.mkdir(parents=True, exist_ok=True)
+            save_tracklets(global_tracklets, str(global_output_dir))
+            print(f"Saved {len(global_tracklets)} global tracklets to {global_output_dir}")
+
+            # Step 3: Gate crossing inference on global tracklets
+            print(f"\n{'='*60}")
+            print("Step 3: Gate Crossing Inference (Global Tracklets)")
+            print(f"{'='*60}\n")
+
+            gate_line = load_gate_line(gate_path)
+            global_crossings = fallback_scene_crossings(combined_detections, gate_line)
+            save_crossings(global_crossings, str(global_output_dir / "crossings"))
+            print(f"Saved global crossings to {global_output_dir / 'crossings'}")
+
+        except Exception as e:
+            print(f"Global tracklet linking failed: {e}")
+    else:
+        print("No detections collected across days.")
+
+    # Step 4: Calibration (if AIS data provided)
+    calibration_result = None
+    if ais_path:
+        print(f"\n{'='*60}")
+        print("Step 4: AIS Calibration")
+        print(f"{'='*60}\n")
+
+        try:
+            calibration_result = run_calibration_step(
+                output_base=output_base,
+                ais_path=ais_path,
+                gate_path=gate_path,
+                start_date=start_date,
+                end_date=end_date
+            )
+        except Exception as e:
+            print(f"Calibration failed: {e}")
 
     # Summary
     total_detections = sum(r.get("total_detections", 0) for r in reports)
@@ -314,6 +469,8 @@ def run_pipeline(
     print(f"Days processed: {len(reports)}")
     print(f"Total scenes: {total_scenes}")
     print(f"Total detections: {total_detections}")
+    if all_detections:
+        print(f"Combined detections: {len(pd.concat(all_detections, ignore_index=True))}")
     print(f"{'='*60}\n")
 
 
@@ -325,10 +482,20 @@ def main():
     parser.add_argument("--aoi", type=str, default="configs/aoi_hormuz.geojson")
     parser.add_argument("--gate", type=str, default="configs/gate_line.geojson")
     parser.add_argument("--output", type=str, default="outputs")
+    parser.add_argument("--ais", type=str, help="Path to AIS data Parquet for calibration")
+    parser.add_argument("--calibrate", action="store_true",
+                        help="Run calibration step only (requires --ais)")
 
     args = parser.parse_args()
 
-    if args.date:
+    if args.calibrate:
+        # Run calibration only
+        if not args.ais:
+            parser.error("--ais required for calibration")
+        start = date.fromisoformat(args.start) if args.start else None
+        end = date.fromisoformat(args.end) if args.end else None
+        run_calibration_step(args.output, args.ais, args.gate, start, end)
+    elif args.date:
         # Single day
         d = date.fromisoformat(args.date)
         run_single_day(d, args.aoi, args.gate, args.output)
@@ -336,7 +503,7 @@ def main():
         # Date range
         start = date.fromisoformat(args.start)
         end = date.fromisoformat(args.end)
-        run_pipeline(start, end, args.aoi, args.gate, args.output)
+        run_pipeline(start, end, args.aoi, args.gate, args.output, args.ais)
     else:
         parser.error("Either --date or both --start and --end required")
 

@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AIS Data Schema",
+  "description": "Schema for AIS (Automatic Identification System) vessel tracking data",
+  "type": "object",
+  "required": ["data"],
+  "properties": {
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["mmsi", "datetime", "latitude", "longitude"],
+        "properties": {
+          "mmsi": {
+            "type": "integer",
+            "description": "Maritime Mobile Service Identity - unique vessel identifier (9 digits)",
+            "minimum": 100000000,
+            "maximum": 999999999,
+            "examples": [367123456, 123456789]
+          },
+          "datetime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "UTC timestamp of AIS message (ISO 8601 format)",
+            "examples": ["2024-02-22T14:30:00Z", "2024-02-22T14:30:00+00:00"]
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Vessel latitude in decimal degrees",
+            "minimum": -90,
+            "maximum": 90,
+            "examples": [25.5, 26.1234]
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Vessel longitude in decimal degrees",
+            "minimum": -180,
+            "maximum": 180,
+            "examples": [56.5, 57.5678]
+          },
+          "speed": {
+            "type": "number",
+            "description": "Speed over ground in knots",
+            "minimum": 0,
+            "maximum": 102.2,
+            "examples": [12.5, 0.0]
+          },
+          "heading": {
+            "type": "number",
+            "description": "True heading in degrees (0-359), 511 = not available",
+            "minimum": 0,
+            "maximum": 511,
+            "examples": [180, 270, 511]
+          },
+          "course": {
+            "type": "number",
+            "description": "Course over ground in degrees (0-359)",
+            "minimum": 0,
+            "maximum": 360,
+            "examples": [180, 270]
+          },
+          "status": {
+            "type": "integer",
+            "description": "Navigational status (AIS standard)",
+            "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+            "enumDescriptions": [
+              "Under way using engine",
+              "At anchor",
+              "Not under command",
+              "Restricted maneuverability",
+              "Constrained by her draught",
+              "Moored",
+              "Aground",
+              "Engaged in fishing",
+              "Under way sailing",
+              "Reserved for future amendment",
+              "Reserved for future amendment",
+              "Reserved for future amendment",
+              "Reserved for future amendment",
+              "Reserved for future amendment",
+              "AISS-ACTIVE",
+              "Not defined"
+            ]
+          },
+          "vessel_name": {
+            "type": "string",
+            "description": "Name of the vessel (max 20 characters)",
+            "maxLength": 20
+          },
+          "vessel_type": {
+            "type": "integer",
+            "description": "Type of ship (AIS standard)",
+            "minimum": 0,
+            "maximum": 99
+          },
+          "length": {
+            "type": "number",
+            "description": "Vessel length in meters",
+            "minimum": 0
+          },
+          "width": {
+            "type": "number",
+            "description": "Vessel width in meters",
+            "minimum": 0
+          },
+          "draught": {
+            "type": "number",
+            "description": "Vessel draught in meters",
+            "minimum": 0
+          },
+          "destination": {
+            "type": "string",
+            "description": "Destination port (max 20 characters)",
+            "maxLength": 20
+          },
+          "eta": {
+            "type": "string",
+            "description": "Estimated time of arrival (MM-DD HH:MM)"
+          }
+        }
+      }
+    }
+  }
+}

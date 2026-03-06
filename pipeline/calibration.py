@@ -132,8 +132,8 @@ def fit_bias_model(
     # Merge on date
     merged = pd.merge(sat_metrics_df, ais_metrics_df, on="date", how="inner")
 
-    if len(merged) < 10:
-        print("Warning: Insufficient data for calibration")
+    if len(merged) < 3:
+        print("Warning: Insufficient data for calibration (need at least 3 days)")
         return {}, {}
 
     # Features: satellite metrics + coverage + metadata
@@ -236,6 +236,134 @@ def save_calibration_report(
 
     return str(output_file)
 
+def run_calibration_workflow(
+    sat_metrics_path: str,
+    ais_data_path: str,
+    gate_coords: list,
+    output_path: str = "outputs/calibration",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None
+) -> dict:
+    """
+    Run full calibration workflow.
+
+    Args:
+        sat_metrics_path: Path to satellite metrics Parquet
+        ais_data_path: Path to AIS Parquet data
+        gate_coords: Gate line coordinates
+        output_path: Output directory for calibration report
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+
+    Returns:
+        Calibration results dict
+    """
+    from pipeline.ais import load_ais_data, prepare_ais_for_calibration
+
+    print("=" * 60)
+    print("AIS Calibration Workflow")
+    print("=" * 60)
+
+    # Step 1: Load satellite metrics
+    print("\nStep 1: Loading satellite metrics...")
+    sat_metrics = pd.read_parquet(sat_metrics_path)
+    print(f"  Loaded {len(sat_metrics)} days of satellite metrics")
+
+    # Ensure date column is string format for merging
+    if 'date' in sat_metrics.columns:
+        sat_metrics['date'] = pd.to_datetime(sat_metrics['date']).dt.strftime('%Y-%m-%d')
+
+    # Step 2: Load and prepare AIS data
+    print("\nStep 2: Loading AIS data...")
+
+    # Get AOI bounds from gate coords
+    lons = [c[0] for c in gate_coords]
+    lats = [c[1] for c in gate_coords]
+    aoi_bounds = (min(lons) - 1, min(lats) - 1, max(lons) + 1, max(lats) + 1)
+
+    ais_df = load_ais_data(
+        ais_data_path,
+        start_date=start_date,
+        end_date=end_date,
+        aoi_bounds=aoi_bounds
+    )
+
+    # Step 3: Compute AIS gate crossings
+    print("\nStep 3: Computing AIS gate crossings...")
+    ais_metrics = prepare_ais_for_calibration(ais_df, gate_coords)
+    print(f"  Computed crossings for {len(ais_metrics)} days")
+
+    # Step 4: Fit bias model
+    print("\nStep 4: Fitting bias correction model...")
+    coefficients, performance = fit_bias_model(sat_metrics, ais_metrics)
+
+    if coefficients:
+        print(f"  R² = {performance['r2']:.3f}")
+        print(f"  MAE = {performance['mae']:.1f} crossings")
+        print(f"  Model: y = {coefficients['intercept']:.2f} + "
+              f"{coefficients['gc_total_coef']:.3f}*gc_total + "
+              f"{coefficients['coverage_coef']:.3f}*coverage")
+    else:
+        print("  Warning: Could not fit bias model (insufficient data)")
+
+    # Step 5: Apply correction and save
+    print("\nStep 5: Applying bias correction...")
+    if coefficients:
+        corrected_metrics = apply_bias_correction(sat_metrics, coefficients)
+        corrected_path = Path(output_path) / "corrected_metrics.parquet"
+        corrected_path.parent.mkdir(parents=True, exist_ok=True)
+        corrected_metrics.to_parquet(corrected_path, index=False)
+        print(f"  Saved corrected metrics to {corrected_path}")
+
+    # Step 6: Save calibration report
+    print("\nStep 6: Saving calibration report...")
+    report_path = save_calibration_report(coefficients, performance, output_path)
+
+    print("\n" + "=" * 60)
+    print("Calibration complete!")
+    print("=" * 60)
+
+    return {
+        "coefficients": coefficients,
+        "performance": performance,
+        "report_path": report_path
+    }
+
+
 if __name__ == "__main__":
-    print("AIS Calibration module")
-    print("Usage: python -m pipeline.calibration --sat <sat_metrics> --ais <ais_data>")
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="AIS Calibration & Bias Correction")
+    parser.add_argument("--sat", type=str, required=True,
+                        help="Path to satellite metrics Parquet")
+    parser.add_argument("--ais", type=str, required=True,
+                        help="Path to AIS data Parquet")
+    parser.add_argument("--gate", type=str, default="configs/gate_line.geojson",
+                        help="Path to gate line GeoJSON")
+    parser.add_argument("--output", type=str, default="outputs/calibration",
+                        help="Output directory")
+    parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
+
+    args = parser.parse_args()
+
+    # Load gate line
+    with open(args.gate) as f:
+        gate_data = json.load(f)
+
+    gate_coords = gate_data['features'][0]['geometry']['coordinates']
+
+    # Parse dates
+    start_date = date.fromisoformat(args.start) if args.start else None
+    end_date = date.fromisoformat(args.end) if args.end else None
+
+    # Run calibration
+    run_calibration_workflow(
+        sat_metrics_path=args.sat,
+        ais_data_path=args.ais,
+        gate_coords=gate_coords,
+        output_path=args.output,
+        start_date=start_date,
+        end_date=end_date
+    )

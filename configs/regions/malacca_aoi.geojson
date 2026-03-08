@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Malacca Strait Central Corridor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [100.0, 1.5],
+            [101.8, 1.5],
+            [101.8, 3.2],
+            [100.0, 3.2],
+            [100.0, 1.5]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ Queries STAC APIs (Planetary Computer) for Sentinel-1 GRD scenes over AOI.
 """
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
@@ -42,6 +42,13 @@ def search_sentinel1(
     # Extract AOI geometry
     aoi_geom = aoi["features"][0]["geometry"]
 
+    # STAC datetime ranges are half-open in practice for daily searches.
+    # Expand same-day requests to the following day so a single-day run
+    # actually covers the full UTC day instead of a single timestamp.
+    search_end_date = end_date
+    if end_date <= start_date:
+        search_end_date = start_date + timedelta(days=1)
+
     # Connect to STAC
     client = Client.open(stac_url)
 
@@ -49,7 +56,7 @@ def search_sentinel1(
     search = client.search(
         collections=[collection],
         intersects=aoi_geom,
-        datetime=f"{start_date.isoformat()}/{end_date.isoformat()}"
+        datetime=f"{start_date.isoformat()}/{search_end_date.isoformat()}"
     )
 
     items = list(search.items())
@@ -104,11 +111,15 @@ def build_manifest(
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    manifest_file = output_dir / "manifest.parquet"
+    df.to_parquet(manifest_file, index=False)
+    print(f"Saved manifest: {manifest_file}")
+
     if len(df) > 0:
         date_str = df.iloc[0]["datetime"][:10]
-        output_file = output_dir / f"{date_str}.parquet"
-        df.to_parquet(output_file, index=False)
-        print(f"Saved manifest: {output_file}")
+        dated_output_file = output_dir / f"{date_str}.parquet"
+        df.to_parquet(dated_output_file, index=False)
+        print(f"Saved dated manifest: {dated_output_file}")
 
     return df
 
@@ -134,19 +145,27 @@ def save_stac_items(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Determine date from first item
+    canonical_output_file = output_dir / "items.ndjson"
+
+    with open(canonical_output_file, "w") as f:
+        for item in items:
+            f.write(json.dumps(item.to_dict()) + "\n")
+
+    print(f"Saved {len(items)} STAC items to {canonical_output_file}")
+
     if len(items) > 0:
         date_str = items[0].datetime.strftime("%Y-%m-%d")
     else:
         date_str = "unknown"
 
-    output_file = output_dir / f"{date_str}_items.ndjson"
+    dated_output_file = output_dir / f"{date_str}_items.ndjson"
+    if dated_output_file != canonical_output_file:
+        with open(dated_output_file, "w") as f:
+            for item in items:
+                f.write(json.dumps(item.to_dict()) + "\n")
+        print(f"Saved dated STAC items to {dated_output_file}")
 
-    with open(output_file, "w") as f:
-        for item in items:
-            f.write(json.dumps(item.to_dict()) + "\n")
-
-    print(f"Saved {len(items)} STAC items to {output_file}")
-    return output_file
+    return canonical_output_file
 
 
 def load_stac_items(items_path: str) -> List[Item]:

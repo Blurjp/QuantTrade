@@ -1,0 +1,114 @@
+{
+  "regions": {
+    "hormuz": [
+      {
+        "region": "hormuz",
+        "asset_class": "etf",
+        "ticker": "USO",
+        "name": "United States Oil Fund",
+        "signal_interpretation": "Low throughput increases crude disruption risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": true
+      },
+      {
+        "region": "hormuz",
+        "asset_class": "equity",
+        "ticker": "FRO",
+        "name": "Frontline",
+        "signal_interpretation": "Disruption can tighten tanker markets.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "hormuz",
+        "asset_class": "equity",
+        "ticker": "STNG",
+        "name": "Scorpio Tankers",
+        "signal_interpretation": "Disruption can tighten tanker markets.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "hormuz",
+        "asset_class": "equity",
+        "ticker": "EURN",
+        "name": "Euronav",
+        "signal_interpretation": "Disruption can tighten tanker markets.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      }
+    ],
+    "bab_el_mandeb": [
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "equity",
+        "ticker": "ZIM",
+        "name": "ZIM Integrated Shipping",
+        "signal_interpretation": "Lower throughput can push freight dislocation and rerouting premiums.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": true
+      }
+    ],
+    "suez_south": [
+      {
+        "region": "suez_south",
+        "asset_class": "equity",
+        "ticker": "ZIM",
+        "name": "ZIM Integrated Shipping",
+        "signal_interpretation": "Disruption around Suez can reprice freight risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": true
+      }
+    ],
+    "malacca": [
+      {
+        "region": "malacca",
+        "asset_class": "etf",
+        "ticker": "USO",
+        "name": "United States Oil Fund",
+        "signal_interpretation": "Lower Malacca throughput raises Asian energy delivery risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": true
+      }
+    ]
+  },
+  "future_placeholders": [
+    {
+      "ticker": "HLAG",
+      "asset_class": "equity"
+    },
+    {
+      "ticker": "CL",
+      "asset_class": "future"
+    },
+    {
+      "ticker": "BRN",
+      "asset_class": "future"
+    },
+    {
+      "ticker": "LNG",
+      "asset_class": "future"
+    }
+  ]
+}

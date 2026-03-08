@@ -15,7 +15,6 @@ from pipeline.detection import run_detection_pipeline
 from pipeline.tracking import link_detections
 from pipeline.crossings import infer_crossings
 from pipeline.metrics import aggregate_daily_metrics
-from pipeline.calibration import fit_bias_model, apply_bias_correction
 
 __all__ = [
     "run_manifest_builder",
@@ -26,7 +25,5 @@ __all__ = [
     "run_detection_pipeline",
     "link_detections",
     "infer_crossings",
-    "aggregate_daily_metrics",
-    "fit_bias_model",
-    "apply_bias_correction"
+    "aggregate_daily_metrics"
 ]

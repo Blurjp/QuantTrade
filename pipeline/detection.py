@@ -5,10 +5,9 @@ Detects ships in SAR imagery using Constant False Alarm Rate (CFAR) algorithm.
 This is a robust baseline that doesn't require training data.
 """
 
-import json
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import geopandas as gpd
 import numpy as np
@@ -17,8 +16,22 @@ import xarray as xr
 from scipy import ndimage
 from scipy.ndimage import label, binary_dilation, binary_erosion
 from shapely.geometry import box
-import rasterio
-from rasterio.transform import from_bounds
+DETECTION_COLUMNS = [
+    "date",
+    "scene_id",
+    "datetime",
+    "detection_id",
+    "bbox_geom_wkt",
+    "score",
+    "centroid_lon",
+    "centroid_lat",
+    "area_px",
+    "area_km2",
+    "mean_intensity_db",
+    "bbox_width_px",
+    "bbox_height_px",
+    "aspect_ratio",
+]
 
 
 def cfar_detector(
@@ -79,7 +92,7 @@ def detect_ships_cfar(
     min_area_px: int = 4,
     max_area_px: int = 500,
     log_scale: bool = True
-) -> gpd.GeoDataFrame:
+) -> Tuple[gpd.GeoDataFrame, Dict[str, float]]:
     """
     Detect ships using CFAR algorithm on SAR data.
 
@@ -101,7 +114,13 @@ def detect_ships_cfar(
     # Extract data
     if band not in ds:
         print(f"Warning: {band} band not found in dataset")
-        return gpd.GeoDataFrame(crs="EPSG:4326")
+        return gpd.GeoDataFrame(crs="EPSG:4326"), {
+            "band": band,
+            "k": k,
+            "threshold_db": np.nan,
+            "connected_components": 0,
+            "detections_before_filter": 0,
+        }
 
     data = ds[band].values
 
@@ -121,6 +140,12 @@ def detect_ships_cfar(
     data = np.where(valid_mask, data, np.nanmin(data[valid_mask]) if valid_mask.any() else -50)
 
     # Run CFAR
+    global_median = float(np.nanmedian(data))
+    global_mad = float(np.nanmedian(np.abs(data - global_median)))
+    global_std = float(np.nanstd(data))
+    robust_std = 1.4826 * global_mad if global_mad > 0 else global_std
+    threshold_db = global_median + k * robust_std
+
     detection_mask = cfar_detector(
         data,
         guard_size=guard_size,
@@ -134,7 +159,16 @@ def detect_ships_cfar(
     print(f"Found {num_features} connected components")
 
     if num_features == 0:
-        return gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326")
+        return (
+            gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326"),
+            {
+                "band": band,
+                "k": float(k),
+                "threshold_db": float(threshold_db),
+                "connected_components": int(num_features),
+                "detections_before_filter": 0,
+            },
+        )
 
     # Extract bboxes
     detections = []
@@ -148,7 +182,16 @@ def detect_ships_cfar(
         y_coords = ds[band].coords['y'].values
     else:
         print("Warning: Cannot find spatial coordinates")
-        return gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326")
+        return (
+            gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326"),
+            {
+                "band": band,
+                "k": float(k),
+                "threshold_db": float(threshold_db),
+                "connected_components": int(num_features),
+                "detections_before_filter": 0,
+            },
+        )
 
     # Get pixel sizes (assume regular grid)
     if len(x_coords) > 1 and len(y_coords) > 1:
@@ -214,10 +257,25 @@ def detect_ships_cfar(
     print(f"Filtered to {len(detections)} valid detections")
 
     if not detections:
-        return gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326")
+        return (
+            gpd.GeoDataFrame(columns=["geometry", "score"], geometry="geometry", crs="EPSG:4326"),
+            {
+                "band": band,
+                "k": float(k),
+                "threshold_db": float(threshold_db),
+                "connected_components": int(num_features),
+                "detections_before_filter": 0,
+            },
+        )
 
     gdf = gpd.GeoDataFrame(detections, geometry="geometry", crs="EPSG:4326")
-    return gdf
+    return gdf, {
+        "band": band,
+        "k": float(k),
+        "threshold_db": float(threshold_db),
+        "connected_components": int(num_features),
+        "detections_before_filter": int(len(gdf)),
+    }
 
 
 def detect_ships_baseline(
@@ -225,7 +283,7 @@ def detect_ships_baseline(
     threshold: float = 0.5,
     min_size: int = 10,
     max_size: int = 500
-) -> gpd.GeoDataFrame:
+) -> Tuple[gpd.GeoDataFrame, Dict[str, float]]:
     """
     Baseline ship detection using CFAR algorithm.
 
@@ -332,6 +390,7 @@ def detections_to_parquet(
 
     for idx, row in gdf.iterrows():
         record = {
+            "date": datetime_str[:10] if datetime_str else "unknown",
             "scene_id": scene_id,
             "datetime": datetime_str,
             "detection_id": f"{scene_id}_{idx}",
@@ -339,12 +398,16 @@ def detections_to_parquet(
             "score": row.get("score", 0.5),
             "centroid_lon": row.geometry.centroid.x,
             "centroid_lat": row.geometry.centroid.y,
+            "area_px": row.get("area_px", 0),
             "area_km2": row.get("area_km2", 0.0),
-            "mean_intensity_db": row.get("mean_intensity_db", 0.0)
+            "mean_intensity_db": row.get("mean_intensity_db", 0.0),
+            "bbox_width_px": row.get("bbox_width_px", 0),
+            "bbox_height_px": row.get("bbox_height_px", 0),
+            "aspect_ratio": row.get("aspect_ratio", np.nan),
         }
         records.append(record)
 
-    df = pd.DataFrame(records)
+    df = pd.DataFrame(records, columns=DETECTION_COLUMNS)
 
     # Save to parquet
     output_dir = Path(output_path)
@@ -353,20 +416,38 @@ def detections_to_parquet(
     date_str = datetime_str[:10] if datetime_str else "unknown"
     output_file = output_dir / f"{date_str}_{scene_id}.parquet"
 
-    if len(df) > 0:
-        df.to_parquet(output_file, index=False)
-        print(f"Saved {len(df)} detections to {output_file}")
-    else:
-        print(f"No detections to save for {scene_id}")
+    df.to_parquet(output_file, index=False)
+    print(f"Saved {len(df)} detections to {output_file}")
 
     return df
+
+
+def detections_to_geojson(
+    df: pd.DataFrame,
+    output_path: str
+) -> str:
+    """Export detections DataFrame with WKT geometry to GeoJSON."""
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if len(df) == 0:
+        output_file.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+        print(f"Saved 0 detections to {output_file}")
+        return str(output_file)
+
+    geometry = gpd.GeoSeries.from_wkt(df["bbox_geom_wkt"], crs="EPSG:4326")
+    gdf = gpd.GeoDataFrame(df.copy(), geometry=geometry, crs="EPSG:4326")
+    gdf.to_file(output_file, driver="GeoJSON")
+    print(f"Saved {len(gdf)} detections to {output_file}")
+    return str(output_file)
 
 
 def run_detection_pipeline(
     ds,
     scene_id: str,
     datetime_str: str,
-    output_path: str = "outputs/detections"
+    output_path: str = "outputs/detections",
+    return_metadata: bool = False
 ) -> pd.DataFrame:
     """
     Full detection pipeline for a single scene.
@@ -381,13 +462,17 @@ def run_detection_pipeline(
         Detection DataFrame
     """
     # Detect ships using CFAR
-    detections_gdf = detect_ships_baseline(ds)
+    detections_gdf, detector_stats = detect_ships_baseline(ds)
 
     # Filter detections
     filtered_gdf = filter_detections(detections_gdf)
+    detector_stats["detections_after_filter"] = int(len(filtered_gdf))
 
     # Save to parquet
     df = detections_to_parquet(filtered_gdf, scene_id, datetime_str, output_path)
+
+    if return_metadata:
+        return df, detector_stats
 
     return df
 

@@ -21,6 +21,9 @@ pip install -r requirements.txt
 # Run pipeline for a single day
 python -m pipeline.run --date 2024-01-15
 
+# Browse outputs locally
+streamlit run ui/app.py
+
 # Run full backfill
 python -m pipeline.run --start 2023-01-01 --end 2024-01-01
 ```
@@ -95,7 +98,11 @@ QuantTrade/
 
 ### Secondary (QA/Debug)
 - Scene manifests
+- Scene load log
 - Detection parquet
+- Detection GeoJSON
+- Per-scene preview PNGs
+- Static HTML day summary
 - Tracklet parquet
 - Calibration reports
 

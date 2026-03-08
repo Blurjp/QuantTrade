@@ -333,26 +333,39 @@ def run_calibration_workflow(
 if __name__ == "__main__":
     import argparse
     import json
+    from pipeline.regions import resolve_region_output_base, resolve_region_paths
 
     parser = argparse.ArgumentParser(description="AIS Calibration & Bias Correction")
-    parser.add_argument("--sat", type=str, required=True,
+    parser.add_argument("--sat", type=str,
                         help="Path to satellite metrics Parquet")
     parser.add_argument("--ais", type=str, required=True,
                         help="Path to AIS data Parquet")
-    parser.add_argument("--gate", type=str, default="configs/gate_line.geojson",
+    parser.add_argument("--gate", type=str, default=None,
                         help="Path to gate line GeoJSON")
-    parser.add_argument("--output", type=str, default="outputs/calibration",
+    parser.add_argument("--output", type=str, default="outputs",
                         help="Output directory")
+    parser.add_argument("--region", type=str, default="hormuz",
+                        help="Configured region ID")
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
 
     args = parser.parse_args()
 
+    default_aoi_path, default_gate_path = resolve_region_paths(args.region)
+    gate_path = args.gate or default_gate_path
+    sat_metrics_path = args.sat or str(Path(resolve_region_output_base(args.output, args.region)) / "metrics" / "daily.parquet")
+    output_path = str(Path(resolve_region_output_base(args.output, args.region)) / "calibration")
+
     # Load gate line
-    with open(args.gate) as f:
+    with open(gate_path) as f:
         gate_data = json.load(f)
 
-    gate_coords = gate_data['features'][0]['geometry']['coordinates']
+    if gate_data['type'] == 'FeatureCollection':
+        gate_coords = gate_data['features'][0]['geometry']['coordinates']
+    elif gate_data['type'] == 'Feature':
+        gate_coords = gate_data['geometry']['coordinates']
+    else:
+        gate_coords = gate_data['coordinates']
 
     # Parse dates
     start_date = date.fromisoformat(args.start) if args.start else None
@@ -360,10 +373,10 @@ if __name__ == "__main__":
 
     # Run calibration
     run_calibration_workflow(
-        sat_metrics_path=args.sat,
+        sat_metrics_path=sat_metrics_path,
         ais_data_path=args.ais,
         gate_coords=gate_coords,
-        output_path=args.output,
+        output_path=output_path,
         start_date=start_date,
         end_date=end_date
     )

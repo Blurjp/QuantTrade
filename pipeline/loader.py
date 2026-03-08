@@ -5,10 +5,12 @@ Loads Sentinel-1 scenes from STAC items into xarray.Dataset.
 Handles Planetary Computer signing for asset access.
 """
 
+import functools
 import json
+import logging
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Iterator
+from typing import List, Optional, Tuple, Iterator, Callable, TypeVar
 
 import pandas as pd
 import xarray as xr
@@ -19,30 +21,113 @@ from pystac import Item
 
 from pipeline.manifest import load_stac_items
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    retryable_exceptions: tuple = (Exception,)
+) -> Callable:
+    """
+    Decorator that retries a function with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        base_delay: Initial delay in seconds
+        max_delay: Maximum delay cap in seconds
+        retryable_exceptions: Tuple of exception types to retry on
+
+    Returns:
+        Decorated function
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        logger.warning(
+                            f"Retry {attempt + 1}/{max_retries} for {func.__name__} "
+                            f"after error: {e}. Waiting {delay:.1f}s..."
+                        )
+                        time.sleep(delay)
+                    else:
+                        logger.error(
+                            f"All {max_retries} retries exhausted for {func.__name__}"
+                        )
+            raise last_exception
+        return wrapper
+    return decorator
+
 
 def load_manifest(manifest_path: str) -> pd.DataFrame:
     """Load manifest from parquet."""
     return pd.read_parquet(manifest_path)
 
 
-def sign_items(items: List[Item]) -> List[Item]:
+def sign_items(items: List[Item], max_retries: int = 3, base_delay: float = 1.0) -> List[Item]:
     """
-    Sign STAC items for Planetary Computer access.
+    Sign STAC items for Planetary Computer access with retry logic.
 
     This is CRITICAL - without signing, you'll get 403s when loading assets.
 
     Args:
         items: List of pystac Items
+        max_retries: Maximum retry attempts per item (default 3)
+        base_delay: Base delay for exponential backoff in seconds (default 1.0)
 
     Returns:
         List of signed Items with valid asset hrefs
     """
     print(f"Signing {len(items)} STAC items...")
     signed_items = []
+    failed_items = []
+
     for item in items:
-        signed_item = pc.sign(item)
-        signed_items.append(signed_item)
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                signed_item = pc.sign(item)
+                signed_items.append(signed_item)
+                break
+            except Exception as e:
+                last_exception = e
+                error_str = str(e).lower()
+                # Retry on 403, 5xx, or connection errors
+                should_retry = (
+                    '403' in error_str or
+                    '500' in error_str or
+                    '502' in error_str or
+                    '503' in error_str or
+                    '504' in error_str or
+                    'connection' in error_str or
+                    'timeout' in error_str
+                )
+
+                if should_retry and attempt < max_retries:
+                    delay = min(base_delay * (2 ** attempt), 30.0)
+                    print(f"    Retry {attempt + 1}/{max_retries} for {item.id} after error: {e}. Waiting {delay:.1f}s...")
+                    time.sleep(delay)
+                elif attempt == max_retries:
+                    print(f"    ERROR: Failed to sign {item.id} after {max_retries} retries: {e}")
+                    failed_items.append((item.id, str(e)))
+
     print(f"Signed {len(signed_items)} items")
+    if failed_items:
+        print(f"Warning: {len(failed_items)} items failed to sign")
+        for item_id, error in failed_items:
+            logger.warning(f"Failed to sign item {item_id}: {error}")
+
     return signed_items
 
 

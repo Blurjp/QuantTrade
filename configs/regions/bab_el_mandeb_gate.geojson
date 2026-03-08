@@ -1,0 +1,13 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Bab el-Mandeb Gate"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [42.7, 12.35],
+      [43.2, 12.85]
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Suez South Gate"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [32.25, 29.45],
+      [32.55, 29.95]
+    ]
+  }
+}

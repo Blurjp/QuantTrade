@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bab el-Mandeb Corridor"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [42.2, 12.1],
+            [43.5, 12.1],
+            [43.5, 13.5],
+            [42.3, 13.5],
+            [42.2, 12.1]
+          ]
+        ]
+      }
+    }
+  ]
+}

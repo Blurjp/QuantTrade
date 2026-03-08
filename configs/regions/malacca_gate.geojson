@@ -1,0 +1,13 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Malacca Gate"
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [100.6, 1.8],
+      [101.2, 2.8]
+    ]
+  }
+}

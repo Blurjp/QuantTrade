@@ -1,0 +1,28 @@
+{
+  "regions": {
+    "hormuz": {
+      "name": "Strait of Hormuz",
+      "description": "Primary crude chokepoint between the Persian Gulf and Gulf of Oman.",
+      "aoi_path": "configs/aoi_hormuz.geojson",
+      "gate_path": "configs/gate_line.geojson"
+    },
+    "bab_el_mandeb": {
+      "name": "Bab el-Mandeb",
+      "description": "Red Sea chokepoint linking the Gulf of Aden and Suez route.",
+      "aoi_path": "configs/regions/bab_el_mandeb_aoi.geojson",
+      "gate_path": "configs/regions/bab_el_mandeb_gate.geojson"
+    },
+    "suez_south": {
+      "name": "Suez South Approach",
+      "description": "Southern approach to the Suez Canal around the Gulf of Suez entry.",
+      "aoi_path": "configs/regions/suez_south_aoi.geojson",
+      "gate_path": "configs/regions/suez_south_gate.geojson"
+    },
+    "malacca": {
+      "name": "Strait of Malacca",
+      "description": "Key Asia-Europe shipping corridor around the narrow Malacca channel.",
+      "aoi_path": "configs/regions/malacca_aoi.geojson",
+      "gate_path": "configs/regions/malacca_gate.geojson"
+    }
+  }
+}

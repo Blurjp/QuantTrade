@@ -7,32 +7,28 @@ Orchestrates the full SAR throughput pipeline.
 import argparse
 import json
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-import xarray as xr
-import numpy as np
 
 from pipeline.manifest import run_manifest_builder, load_aoi
-from pipeline.loader import (
-    load_scenes_from_manifest,
-    iter_scenes,
-    compute_coverage_score,
-    sign_items
-)
+from pipeline.loader import compute_coverage_score, sign_items
 from pipeline.preprocess import preprocess_scene
-from pipeline.detection import run_detection_pipeline
+from pipeline.detection import DETECTION_COLUMNS, detections_to_geojson, run_detection_pipeline
 from pipeline.tracking import link_detections, save_tracklets
-from pipeline.crossings import load_gate_line, infer_crossings, save_crossings, fallback_scene_crossings
+from pipeline.crossings import load_gate_line, save_crossings, fallback_scene_crossings
 from pipeline.metrics import aggregate_daily_metrics, save_metrics
+from pipeline.qa import save_scene_preview, write_daily_html, write_scene_load_log
+from pipeline.regions import resolve_region_output_base, resolve_region_paths
 
 
 def run_calibration_step(
     output_base: str,
     ais_path: str,
     gate_path: str,
+    aoi_path: str = "configs/aoi_hormuz.geojson",
     start_date: Optional[date] = None,
     end_date: Optional[date] = None
 ) -> dict:
@@ -43,6 +39,7 @@ def run_calibration_step(
         output_base: Base output directory
         ais_path: Path to AIS Parquet data
         gate_path: Path to gate line GeoJSON
+        aoi_path: Path to AOI GeoJSON
         start_date: Optional start date filter
         end_date: Optional end date filter
 
@@ -69,10 +66,16 @@ def run_calibration_step(
                         manifest_path = day_dir / "manifests" / "manifest.parquet"
                         manifest = pd.read_parquet(manifest_path) if manifest_path.exists() else None
 
-                        aoi = load_aoi()
+                        aoi = load_aoi(aoi_path)
                         aoi_geom = aoi["features"][0]["geometry"]
 
-                        metrics = aggregate_daily_metrics(crossings, manifest, aoi_geom)
+                        metrics = aggregate_daily_metrics(
+                            target_date=day_dir.name,
+                            manifest_df=manifest if manifest is not None else pd.DataFrame(),
+                            load_log_df=pd.DataFrame(),
+                            crossings_df=crossings,
+                            aoi_geom=aoi_geom,
+                        )
                         all_metrics.append(metrics)
 
         if all_metrics:
@@ -112,6 +115,7 @@ def run_single_day(
     aoi_path: str = "configs/aoi_hormuz.geojson",
     gate_path: str = "configs/gate_line.geojson",
     output_base: str = "outputs",
+    region_id: str = "hormuz",
     return_detections: bool = False
 ) -> dict:
     """
@@ -135,6 +139,7 @@ def run_single_day(
         Run report dict (with 'detections_df' key if return_detections=True)
     """
     start_time = time.time()
+    target_date_str = target_date.isoformat()
     report = {
         "date": target_date.isoformat(),
         "status": "started",
@@ -144,17 +149,22 @@ def run_single_day(
     }
 
     print(f"\n{'='*60}")
-    print(f"Hormuz SAR Throughput Pipeline - Single Day")
+    print(f"QuantTrade Pipeline - Single Day")
+    print(f"Region: {region_id}")
     print(f"Date: {target_date}")
     print(f"{'='*60}\n")
 
     # Create output directories
-    output_dir = Path(output_base)
+    output_dir = Path(resolve_region_output_base(output_base, region_id))
     date_dir = output_dir / target_date.strftime("%Y-%m-%d")
+    manifests_dir = date_dir / "manifests"
+    logs_dir = date_dir / "logs"
     detections_dir = date_dir / "detections"
+    metrics_dir = date_dir / "metrics"
     qa_dir = date_dir / "qa"
+    crossings_dir = date_dir / "crossings"
 
-    for d in [detections_dir, qa_dir]:
+    for d in [manifests_dir, logs_dir, detections_dir, metrics_dir, qa_dir, crossings_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
     # Load AOI for coverage computation
@@ -169,17 +179,13 @@ def run_single_day(
         start_date=target_date,
         end_date=target_date,
         aoi_path=aoi_path,
-        output_path=str(date_dir / "manifests")
+        output_path=str(manifests_dir)
     )
 
     report["manifest_build_time_s"] = round(time.time() - step_start, 2)
     report["scenes_found"] = len(manifest)
-
-    if len(manifest) == 0:
-        print("No scenes found. Exiting.")
-        report["status"] = "no_scenes"
-        _write_report(report, qa_dir)
-        return report
+    manifest_path = manifests_dir / "manifest.parquet"
+    manifest.to_parquet(manifest_path, index=False)
 
     # Step 2: Compute coverage score
     print("\nStep 2: Computing coverage score...")
@@ -191,16 +197,49 @@ def run_single_day(
     print(f"Coverage score: {coverage['coverage_score']:.2%}")
     print(f"Scenes covering AOI: {coverage['num_scenes']}")
 
+    # Collect scene times for timing breakdown
+    scene_times = []
+    for item in items:
+        if item.datetime:
+            scene_times.append(item.datetime.isoformat())
+    scene_times.sort()
+    report["scene_times"] = scene_times
+
+    # Compute time gaps between scenes
+    if len(scene_times) > 1:
+        from datetime import datetime as dt
+        times = [dt.fromisoformat(t.replace("Z", "+00:00")) for t in scene_times]
+        gaps = [(times[i+1] - times[i]).total_seconds() / 3600 for i in range(len(times)-1)]
+        report["time_gap_stats"] = {
+            "min_hours": round(min(gaps), 2),
+            "max_hours": round(max(gaps), 2),
+            "mean_hours": round(sum(gaps) / len(gaps), 2),
+        }
+    else:
+        report["time_gap_stats"] = None
+
+    if len(manifest) == 0:
+        print("No scenes found for date.")
+
     # Step 3: Process each scene
     print("\nStep 3: Processing scenes...")
     step_start = time.time()
 
     all_detections = []
-    scene_reports = []
+    scene_load_records = []
+    preview_paths = []
 
     # Load items for iteration
-    items = load_stac_items(str(items_path))
     signed_items = sign_items(items)
+    gate_line = load_gate_line(gate_path)
+    aoi_coords = aoi_geom.get("coordinates", [[]])[0]
+    lons = [c[0] for c in aoi_coords]
+    lats = [c[1] for c in aoi_coords]
+    bbox = [min(lons), min(lats), max(lons), max(lats)] if aoi_coords else None
+    # 0.0001 deg can create ~56M-pixel loads for a single Hormuz scene,
+    # which is too expensive for interactive daily runs. Use a coarser
+    # default that still preserves ship-scale detections.
+    resolution = 0.0003
 
     for i, item in enumerate(signed_items):
         scene_id = item.id
@@ -212,82 +251,111 @@ def run_single_day(
             # Load single scene with explicit CRS and resolution
             from odc import stac
 
-            # Get AOI bounds for cropping
-            aoi_coords = aoi_geom.get("coordinates", [[]])[0]
-            lons = [c[0] for c in aoi_coords]
-            lats = [c[1] for c in aoi_coords]
-            bbox = [min(lons), min(lats), max(lons), max(lats)]
-
             ds = stac.load(
                 [item],
                 bands=["vh", "vv"],
                 chunks={"x": 1024, "y": 1024},
                 crs="EPSG:4326",
-                resolution=0.0001,  # ~10m in degrees
+                resolution=resolution,
                 bbox=bbox,
                 preserve_original_order=True
             )
 
-            scene_report = {
+            shape_summary = {}
+            for band in ["vv", "vh"]:
+                if band in ds:
+                    shape_summary[band] = list(ds[band].shape)
+
+            scene_record = {
                 "scene_id": scene_id,
                 "datetime": datetime_str,
-                "status": "loaded"
+                "status": "loaded",
+                "error": "",
+                "bbox": json.dumps(bbox),
+                "resolution": resolution,
+                "bands": "vh,vv",
+                "dataset_dims": json.dumps({k: int(v) for k, v in ds.sizes.items()}),
+                "band_shapes": json.dumps(shape_summary),
             }
 
             # Preprocess
             ds_preprocessed, qc_metrics = preprocess_scene(ds)
-            scene_report["qc_metrics"] = qc_metrics
+            scene_record["qc_metrics"] = json.dumps(qc_metrics)
 
             # Detect (CFAR baseline)
-            detections_df = run_detection_pipeline(
+            detections_df, detector_stats = run_detection_pipeline(
                 ds_preprocessed,
                 scene_id=scene_id,
                 datetime_str=datetime_str,
-                output_path=str(detections_dir)
+                output_path=str(detections_dir),
+                return_metadata=True
             )
 
-            scene_report["detections"] = len(detections_df)
-            scene_report["status"] = "success"
+            scene_record["detections"] = len(detections_df)
+            scene_record["detector_stats"] = json.dumps(detector_stats)
 
             all_detections.append(detections_df)
+            scene_load_records.append(scene_record)
             report["scenes_processed"] += 1
             report["total_detections"] += len(detections_df)
 
-            # Save scene-level QC
-            qc_file = qa_dir / f"{scene_id}_qc.json"
-            with open(qc_file, "w") as f:
-                json.dump(scene_report, f, indent=2, default=str)
+            preview_path = qa_dir / f"{scene_id}.png"
+            preview_paths.append(
+                save_scene_preview(
+                    ds_preprocessed,
+                    detections_df,
+                    aoi_geom,
+                    gate_line,
+                    str(preview_path),
+                    title=f"{scene_id} ({len(detections_df)} detections)",
+                )
+            )
 
         except Exception as e:
             error_msg = f"Error processing {scene_id}: {str(e)}"
             print(f"    ERROR: {error_msg}")
             report["errors"].append(error_msg)
-            scene_reports.append({"scene_id": scene_id, "status": "error", "error": str(e)})
+            scene_load_records.append({
+                "scene_id": scene_id,
+                "datetime": datetime_str,
+                "status": "error",
+                "error": str(e),
+                "bbox": json.dumps(bbox),
+                "resolution": resolution,
+                "bands": "vh,vv",
+                "dataset_dims": "",
+                "band_shapes": "",
+                "qc_metrics": "",
+                "detector_stats": "",
+                "detections": 0,
+            })
 
     report["scene_processing_time_s"] = round(time.time() - step_start, 2)
+    load_log_path = write_scene_load_log(scene_load_records, str(logs_dir / "scene_load_log.parquet"))
+    load_log_df = pd.read_parquet(load_log_path)
 
     # Step 4: Aggregate daily detections
     print(f"\nStep 4: Aggregating daily detections...")
     if all_detections:
         daily_detections = pd.concat(all_detections, ignore_index=True)
-        daily_file = detections_dir / "daily_detections.parquet"
-        daily_detections.to_parquet(daily_file, index=False)
-        print(f"Saved {len(daily_detections)} total detections to {daily_file}")
     else:
-        daily_detections = pd.DataFrame()
+        daily_detections = pd.DataFrame(columns=DETECTION_COLUMNS)
         print("No detections to aggregate.")
+
+    daily_file = detections_dir / "daily_detections.parquet"
+    daily_detections.to_parquet(daily_file, index=False)
+    print(f"Saved {len(daily_detections)} total detections to {daily_file}")
+    detections_geojson_path = detections_to_geojson(daily_detections, str(detections_dir / "daily_detections.geojson"))
 
     # Step 5: Tracklet linking (if detections exist)
     print(f"\nStep 5: Tracklet linking...")
+    crossings = pd.DataFrame()
     if len(daily_detections) > 0:
         try:
-            # Use tighter parameters for ship tracklets:
-            # Ships move ~15-20 knots = In 6 hours: ~110-220 km
-            # Use 5km threshold for same-day linking
             tracklets = link_detections(
                 daily_detections,
-                max_distance_km=5.0,  # 5km - reasonable ship movement in 6 hours
-                max_time_gap_hours=6.0,  # 6 hours between scenes
+                max_distance_km=5.0,
+                max_time_gap_hours=6.0,
                 min_tracklet_length=2
             )
             save_tracklets(tracklets, str(date_dir / "tracklets"))
@@ -300,14 +368,12 @@ def run_single_day(
 
     # Step 6: Gate crossing inference
     print(f"\nStep 6: Gate crossing inference...")
-    gate_line = load_gate_line(gate_path)
 
-    # Use fallback scene crossings for same-day data
     if len(daily_detections) > 0:
         try:
             crossings = fallback_scene_crossings(daily_detections, gate_line)
-            save_crossings(crossings, str(date_dir / "crossings"))
-            # Count crossings (fallback format has estimated_gc_in/out)
+            if len(crossings) > 0:
+                save_crossings(crossings, str(crossings_dir))
             if len(crossings) > 0:
                 report["crossings"] = {
                     "in": int(crossings["estimated_gc_in"].iloc[0]) if "estimated_gc_in" in crossings.columns else 0,
@@ -317,7 +383,36 @@ def run_single_day(
             print(f"  Gate crossing inference failed: {e}")
             report["errors"].append(f"Gate crossing: {str(e)}")
 
-    # Step 7: Finalize report
+    print(f"\nStep 7: Daily metrics...")
+    metrics_df = aggregate_daily_metrics(
+        target_date=target_date_str,
+        manifest_df=manifest,
+        load_log_df=load_log_df,
+        crossings_df=crossings,
+        aoi_geom=aoi_geom,
+    )
+    metrics_path = save_metrics(metrics_df, str(metrics_dir))
+    report["metrics_path"] = metrics_path
+    report["global_metrics_path"] = _append_global_metrics(metrics_df, output_base, region_id)
+
+    print(f"\nStep 8: QA outputs...")
+    html_path = write_daily_html(
+        target_date=target_date_str,
+        output_path=str(qa_dir / "index.html"),
+        metrics_df=metrics_df,
+        load_log_df=load_log_df,
+        detections_df=daily_detections,
+        preview_paths=preview_paths,
+        manifest_path=str(manifest_path),
+        detections_geojson_path=detections_geojson_path,
+        metrics_path=metrics_path,
+        load_log_path=load_log_path,
+    )
+    report["qa_index"] = html_path
+    report["scene_load_log_path"] = load_log_path
+    report["detections_geojson_path"] = detections_geojson_path
+
+    # Step 9: Finalize report
     report["status"] = "completed" if not report["errors"] else "completed_with_errors"
     report["total_time_s"] = round(time.time() - start_time, 2)
 
@@ -327,7 +422,7 @@ def run_single_day(
     print("Pipeline complete!")
     print(f"Scenes processed: {report['scenes_processed']}")
     print(f"Total detections: {report['total_detections']}")
-    print(f"Coverage: {coverage['coverage_score']:.2%}")
+    print(f"Coverage: {metrics_df.iloc[0]['coverage_score']:.2%}")
     print(f"Total time: {report['total_time_s']:.1f}s")
     if report["errors"]:
         print(f"Errors: {len(report['errors'])}")
@@ -347,12 +442,30 @@ def _write_report(report: dict, qa_dir: Path):
     print(f"Run report saved to {report_file}")
 
 
+def _append_global_metrics(metrics_df: pd.DataFrame, output_base: str, region_id: str = "hormuz"):
+    """Append or replace the day row in the root metrics table."""
+    global_metrics_dir = Path(resolve_region_output_base(output_base, region_id)) / "metrics"
+    global_metrics_dir.mkdir(parents=True, exist_ok=True)
+    global_metrics_file = global_metrics_dir / "daily.parquet"
+
+    if global_metrics_file.exists():
+        existing = pd.read_parquet(global_metrics_file)
+        combined = pd.concat([existing, metrics_df], ignore_index=True)
+        combined = combined.drop_duplicates(subset=["date"], keep="last")
+    else:
+        combined = metrics_df.copy()
+
+    combined.to_parquet(global_metrics_file, index=False)
+    return str(global_metrics_file)
+
+
 def run_pipeline(
     start_date: date,
     end_date: date,
     aoi_path: str = "configs/aoi_hormuz.geojson",
     gate_path: str = "configs/gate_line.geojson",
     output_base: str = "outputs",
+    region_id: str = "hormuz",
     ais_path: Optional[str] = None
 ):
     """
@@ -372,7 +485,8 @@ def run_pipeline(
         output_base: Base output directory
     """
     print(f"\n{'='*60}")
-    print(f"Hormuz SAR Throughput Pipeline")
+    print(f"QuantTrade Pipeline")
+    print(f"Region: {region_id}")
     print(f"Date Range: {start_date} to {end_date}")
     print(f"{'='*60}\n")
 
@@ -387,6 +501,7 @@ def run_pipeline(
             aoi_path=aoi_path,
             gate_path=gate_path,
             output_base=output_base,
+            region_id=region_id,
             return_detections=True  # Collect detections for global linking
         )
         reports.append(report)
@@ -396,11 +511,8 @@ def run_pipeline(
             all_detections.append(report["detections_df"])
             print(f"  Collected {len(report['detections_df'])} detections from {current_date}")
 
-        current_date = date(
-            current_date.year,
-            current_date.month,
-            current_date.day + 1
-        )
+        current_date = current_date + timedelta(days=1)
+
 
     # Step 2: Global tracklet linking across all days
     print(f"\n{'='*60}")
@@ -422,7 +534,7 @@ def run_pipeline(
             )
 
             # Save global tracklets
-            global_output_dir = Path(output_base) / "global_tracklets"
+            global_output_dir = Path(resolve_region_output_base(output_base, region_id)) / "global_tracklets"
             global_output_dir.mkdir(parents=True, exist_ok=True)
             save_tracklets(global_tracklets, str(global_output_dir))
             print(f"Saved {len(global_tracklets)} global tracklets to {global_output_dir}")
@@ -454,6 +566,7 @@ def run_pipeline(
                 output_base=output_base,
                 ais_path=ais_path,
                 gate_path=gate_path,
+                aoi_path=aoi_path,
                 start_date=start_date,
                 end_date=end_date
             )
@@ -475,13 +588,14 @@ def run_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Hormuz SAR Throughput Pipeline")
+    parser = argparse.ArgumentParser(description="QuantTrade SAR Throughput Pipeline")
     parser.add_argument("--date", type=str, help="Single date (YYYY-MM-DD)")
     parser.add_argument("--start", type=str, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--aoi", type=str, default="configs/aoi_hormuz.geojson")
-    parser.add_argument("--gate", type=str, default="configs/gate_line.geojson")
+    parser.add_argument("--aoi", type=str, default=None)
+    parser.add_argument("--gate", type=str, default=None)
     parser.add_argument("--output", type=str, default="outputs")
+    parser.add_argument("--region", type=str, default="hormuz")
     parser.add_argument("--ais", type=str, help="Path to AIS data Parquet for calibration")
     parser.add_argument("--calibrate", action="store_true",
                         help="Run calibration step only (requires --ais)")
@@ -494,16 +608,32 @@ def main():
             parser.error("--ais required for calibration")
         start = date.fromisoformat(args.start) if args.start else None
         end = date.fromisoformat(args.end) if args.end else None
-        run_calibration_step(args.output, args.ais, args.gate, start, end)
+        default_aoi_path, default_gate_path = resolve_region_paths(args.region)
+        aoi_path = args.aoi or default_aoi_path
+        gate_path = args.gate or default_gate_path
+        run_calibration_step(
+            resolve_region_output_base(args.output, args.region),
+            args.ais,
+            gate_path,
+            aoi_path,
+            start,
+            end,
+        )
     elif args.date:
         # Single day
         d = date.fromisoformat(args.date)
-        run_single_day(d, args.aoi, args.gate, args.output)
+        default_aoi_path, default_gate_path = resolve_region_paths(args.region)
+        aoi_path = args.aoi or default_aoi_path
+        gate_path = args.gate or default_gate_path
+        run_single_day(d, aoi_path, gate_path, args.output, args.region)
     elif args.start and args.end:
         # Date range
         start = date.fromisoformat(args.start)
         end = date.fromisoformat(args.end)
-        run_pipeline(start, end, args.aoi, args.gate, args.output, args.ais)
+        default_aoi_path, default_gate_path = resolve_region_paths(args.region)
+        aoi_path = args.aoi or default_aoi_path
+        gate_path = args.gate or default_gate_path
+        run_pipeline(start, end, aoi_path, gate_path, args.output, args.region, args.ais)
     else:
         parser.error("Either --date or both --start and --end required")
 

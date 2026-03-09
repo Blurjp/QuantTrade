@@ -117,22 +117,30 @@ def main():
         parser.error("Use --region --symbol, --region --all-symbols, or --all-regions")
 
     results = []
+    failures = []
     for region_id, symbol in targets:
-        results.append(
-            run_region_symbol_backtest(
-                region_id=region_id,
-                symbol=symbol,
-                output_base=args.output,
-                start=args.start,
-                end=args.end,
-                version=args.version,
-                use_corrected=use_corrected,
-                refresh_prices=args.refresh_prices,
+        try:
+            results.append(
+                run_region_symbol_backtest(
+                    region_id=region_id,
+                    symbol=symbol,
+                    output_base=args.output,
+                    start=args.start,
+                    end=args.end,
+                    version=args.version,
+                    use_corrected=use_corrected,
+                    refresh_prices=args.refresh_prices,
+                )
             )
-        )
+        except Exception as exc:
+            failures.append({"region": region_id, "symbol": symbol, "error": str(exc)})
 
     result_df = pd.DataFrame(results)
-    print(result_df.to_string(index=False))
+    if not result_df.empty:
+        print(result_df.to_string(index=False))
+    if failures:
+        print("\nFailures:")
+        print(pd.DataFrame(failures).to_string(index=False))
 
 
 if __name__ == "__main__":

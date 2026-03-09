@@ -210,20 +210,21 @@ def _render_global_monitor(st, regions: list[dict], output_base: str) -> None:
 
     st.markdown("**Global Monitor**")
     st.caption("Latest regional state ranked by actionability and confidence.")
-    display_df = monitor_df.copy()
-    display_df["coverage_score"] = display_df["coverage_score"].apply(_format_pct)
-    display_df = display_df.rename(
-        columns={
-            "region_name": "region",
-            "date": "latest_day",
-            "coverage_score": "coverage",
-            "signal_strength": "strength",
-            "primary_instrument": "primary_ticker",
+    display_df = pd.DataFrame(
+        {
+            "region": monitor_df["region_name"],
+            "latest_day": monitor_df["date"],
+            "run_status": monitor_df["run_status"],
+            "last_run_at": monitor_df["last_run_at"],
+            "actionability": monitor_df["actionability"],
+            "signal": monitor_df["signal"],
+            "confidence": monitor_df["confidence"],
+            "coverage": monitor_df["coverage_score"].apply(_format_pct),
+            "strength": monitor_df["signal_strength"],
+            "primary_ticker": monitor_df["primary_instrument"],
+            "reroute_flag": monitor_df["reroute_flag"],
         }
     )
-    display_df = display_df[
-        ["region", "latest_day", "run_status", "last_run_at", "actionability", "signal", "confidence", "coverage", "strength", "primary_ticker", "reroute_flag"]
-    ]
     st.dataframe(display_df, width="stretch")
 
 

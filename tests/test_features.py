@@ -21,7 +21,33 @@ def test_instrument_registry_has_primary_assets():
     suez = get_primary_instrument("suez_south")
     assert hormuz["ticker"] == "USO"
     assert suez["ticker"] == "ZIM"
-    assert len(list_region_instruments("malacca", enabled_for_backtest=True)) == 1
+    assert {item["ticker"] for item in list_region_instruments("hormuz", enabled_for_backtest=True)} == {
+        "USO",
+        "XLE",
+        "FRO",
+        "STNG",
+        "EURN",
+    }
+    assert {item["ticker"] for item in list_region_instruments("suez_south", enabled_for_backtest=True)} == {
+        "ZIM",
+        "DBA",
+        "MOO",
+        "SOYB",
+        "CORN",
+        "WEAT",
+    }
+    assert {item["ticker"] for item in list_region_instruments("bab_el_mandeb", enabled_for_backtest=True)} == {
+        "ZIM",
+        "DBA",
+        "MOO",
+        "SOYB",
+        "CORN",
+        "WEAT",
+    }
+    assert {item["ticker"] for item in list_region_instruments("malacca", enabled_for_backtest=True)} == {
+        "USO",
+        "XLE",
+    }
 
 
 def test_v2_signal_table_sets_confirmation_and_reroute(tmp_path):

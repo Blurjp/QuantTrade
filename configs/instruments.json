@@ -48,6 +48,18 @@
         "enabled_for_backtest": true,
         "enabled_for_alerts": true,
         "primary": false
+      },
+      {
+        "region": "hormuz",
+        "asset_class": "etf",
+        "ticker": "XLE",
+        "name": "Energy Select Sector SPDR Fund",
+        "signal_interpretation": "Low Hormuz throughput can raise oil and energy equity risk premium.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
       }
     ],
     "bab_el_mandeb": [
@@ -62,6 +74,66 @@
         "enabled_for_backtest": true,
         "enabled_for_alerts": true,
         "primary": true
+      },
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "etf",
+        "ticker": "DBA",
+        "name": "Invesco DB Agriculture Fund",
+        "signal_interpretation": "Bab el-Mandeb disruption can tighten grain and soft commodity logistics.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "etf",
+        "ticker": "MOO",
+        "name": "VanEck Agribusiness ETF",
+        "signal_interpretation": "Bab el-Mandeb disruption can reprice agribusiness supply chain risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "etf",
+        "ticker": "SOYB",
+        "name": "Teucrium Soybean Fund",
+        "signal_interpretation": "Lower throughput can raise soybean shipping and basis risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "etf",
+        "ticker": "CORN",
+        "name": "Teucrium Corn Fund",
+        "signal_interpretation": "Lower throughput can raise corn shipping and rerouting risk.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "bab_el_mandeb",
+        "asset_class": "etf",
+        "ticker": "WEAT",
+        "name": "Teucrium Wheat Fund",
+        "signal_interpretation": "Lower throughput can tighten wheat export logistics.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
       }
     ],
     "suez_south": [
@@ -76,6 +148,66 @@
         "enabled_for_backtest": true,
         "enabled_for_alerts": true,
         "primary": true
+      },
+      {
+        "region": "suez_south",
+        "asset_class": "etf",
+        "ticker": "DBA",
+        "name": "Invesco DB Agriculture Fund",
+        "signal_interpretation": "Suez disruption can tighten agricultural shipping lanes and rerouting costs.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "suez_south",
+        "asset_class": "etf",
+        "ticker": "MOO",
+        "name": "VanEck Agribusiness ETF",
+        "signal_interpretation": "Suez disruption can reprice agribusiness supply chain exposure.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "suez_south",
+        "asset_class": "etf",
+        "ticker": "SOYB",
+        "name": "Teucrium Soybean Fund",
+        "signal_interpretation": "Suez disruption can raise soybean shipping costs and delays.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "suez_south",
+        "asset_class": "etf",
+        "ticker": "CORN",
+        "name": "Teucrium Corn Fund",
+        "signal_interpretation": "Suez disruption can raise corn shipping costs and delays.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
+      },
+      {
+        "region": "suez_south",
+        "asset_class": "etf",
+        "ticker": "WEAT",
+        "name": "Teucrium Wheat Fund",
+        "signal_interpretation": "Suez disruption can tighten wheat flow and export timing.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
       }
     ],
     "malacca": [
@@ -90,6 +222,18 @@
         "enabled_for_backtest": true,
         "enabled_for_alerts": true,
         "primary": true
+      },
+      {
+        "region": "malacca",
+        "asset_class": "etf",
+        "ticker": "XLE",
+        "name": "Energy Select Sector SPDR Fund",
+        "signal_interpretation": "Lower Malacca throughput raises Asian energy delivery risk and supports energy equities.",
+        "trade_direction_on_low_throughput": "long",
+        "trade_direction_on_high_throughput": "short",
+        "enabled_for_backtest": true,
+        "enabled_for_alerts": true,
+        "primary": false
       }
     ]
   },

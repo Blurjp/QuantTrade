@@ -58,6 +58,95 @@ def _coverage_confidence(coverage_score: float | None) -> str:
     return "Low"
 
 
+def _build_trade_ticket(trade_signal: dict | None, region_instruments: list[dict]) -> dict | None:
+    if trade_signal is None:
+        return None
+
+    primary = region_instruments[0] if region_instruments else None
+    ticker = primary["ticker"] if primary else "n/a"
+    signal = trade_signal["signal"]
+    confidence = trade_signal["confidence"]
+    coverage = trade_signal.get("coverage_score") or 0.0
+    baseline = trade_signal.get("baseline_value")
+    throughput = trade_signal.get("throughput_index_corrected")
+    signal_strength = trade_signal.get("signal_strength") or 0.0
+
+    position_size = "No Trade"
+    if trade_signal.get("actionability") == "Actionable":
+        position_size = "Medium" if confidence == "High" else "Small"
+    elif trade_signal.get("actionability") == "Watchlist":
+        position_size = "Starter / Watchlist" if confidence != "Low" else "No Trade"
+
+    entry = "Wait"
+    exit_rule = "Stay flat until a new actionable signal appears."
+    stop_loss = "No position."
+    take_profit = "No position."
+
+    if signal == "Long disruption risk":
+        primary_trade = f"Long {ticker}"
+        direction = "做多"
+        entry = "Enter next market open if signal is still active."
+        exit_rule = "Exit when signal downgrades to `No trade` or `Short disruption risk`."
+        stop_loss = "Tight stop if confidence is Medium; wider stop only if confidence is High."
+        take_profit = "Scale out when signal weakens or after 2-3 strong up days in the trade asset."
+        invalidation = (
+            "If tomorrow the signal drops to `No trade`, confidence falls to `Low`, "
+            "or throughput mean-reverts back above the 7-day baseline."
+        )
+    elif signal == "Short disruption risk":
+        primary_trade = f"Short {ticker}"
+        direction = "做空"
+        entry = "Enter next market open if signal is still active."
+        exit_rule = "Exit when signal downgrades to `No trade` or `Long disruption risk`."
+        stop_loss = "Tight stop if confidence is Medium; wider stop only if confidence is High."
+        take_profit = "Scale out when signal weakens or after 2-3 strong down days in the trade asset."
+        invalidation = (
+            "If tomorrow the signal drops to `No trade`, confidence falls to `Low`, "
+            "or throughput reverses back below the 7-day baseline."
+        )
+    else:
+        primary_trade = "No Trade"
+        direction = "观望"
+        invalidation = "Only act if the signal upgrades to `Actionable` with at least `Medium` confidence."
+
+    why = (
+        f"{signal} | confidence={confidence} | coverage={_format_pct(coverage)} | "
+        f"value={_format_num(throughput)} vs baseline={_format_num(baseline)}"
+    )
+    if trade_signal.get("reroute_flag"):
+        why += " | reroute risk detected"
+
+    if coverage < 0.55:
+        position_size = "No Trade"
+        primary_trade = "No Trade"
+        direction = "观望"
+        entry = "Do not enter."
+        exit_rule = "No position."
+        stop_loss = "No position."
+        take_profit = "No position."
+        invalidation = "Coverage is too low; wait for a higher-quality day."
+
+    if position_size == "Medium" and signal_strength >= 1.5:
+        stop_loss = "Use a standard daily risk stop; do not allow a full thesis reversal."
+        take_profit = "Take partial profits into a strong move; trail the rest while the signal remains active."
+    elif position_size == "Small":
+        stop_loss = "Use a tighter stop; this is a lower-conviction trade."
+        take_profit = "Take profits quickly if the asset reacts before signal confidence improves."
+
+    return {
+        "primary_trade": primary_trade,
+        "direction": direction,
+        "position_size": position_size,
+        "why": why,
+        "entry": entry,
+        "exit_rule": exit_rule,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "invalidation": invalidation,
+        "ticker": ticker,
+    }
+
+
 def _load_remote_bundle(api_base: str, selected_day: str, output_base: str, region_id: str) -> dict:
     params = {"output_base": output_base, "region": region_id}
     bundle = requests.get(f"{api_base.rstrip('/')}/days/{selected_day}", params=params, timeout=30)
@@ -193,6 +282,35 @@ def _render_summary_header(st, selected_day: str, trade_signal: dict | None, met
     )
 
 
+def _render_trade_ticket(st, trade_ticket: dict | None) -> None:
+    st.markdown("**交易指令页**")
+    if trade_ticket is None:
+        st.info("今天没有足够信号生成交易指令。")
+        return
+
+    ticket_cols = st.columns(4)
+    ticket_cols[0].metric("Primary Trade", trade_ticket["primary_trade"])
+    ticket_cols[1].metric("Direction", trade_ticket["direction"])
+    ticket_cols[2].metric("Position Size", trade_ticket["position_size"])
+    ticket_cols[3].metric("Ticker", trade_ticket["ticker"])
+
+    detail_cols = st.columns(3)
+    with detail_cols[0]:
+        st.markdown("**Why**")
+        st.write(trade_ticket["why"])
+    with detail_cols[1]:
+        st.markdown("**Entry / Exit**")
+        st.write(f"Entry: {trade_ticket['entry']}")
+        st.write(f"Exit: {trade_ticket['exit_rule']}")
+    with detail_cols[2]:
+        st.markdown("**Risk Rules**")
+        st.write(f"Stop-loss: {trade_ticket['stop_loss']}")
+        st.write(f"Take-profit: {trade_ticket['take_profit']}")
+
+    st.markdown("**Invalidation**")
+    st.write(trade_ticket["invalidation"])
+
+
 def _render_how_to_use(st) -> None:
     with st.expander("这个页面该怎么用", expanded=True):
         st.markdown(
@@ -266,8 +384,10 @@ def main():
     metrics_row = metrics_df.iloc[0].to_dict() if len(metrics_df) > 0 else {}
     trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
     region_instruments = list_region_instruments(selected_region)
+    trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
 
     _render_summary_header(st, selected_day, trade_signal, metrics_row)
+    _render_trade_ticket(st, trade_ticket)
     _render_how_to_use(st)
 
     metric_columns = st.columns(5)
@@ -296,12 +416,12 @@ def main():
         quick_cols = st.columns(2)
         with quick_cols[0]:
             st.markdown("**给交易看的结论**")
-            if trade_signal is None:
+            if trade_ticket is None:
                 st.write("没有校准信号。")
             else:
-                st.write(f"- 建议: {trade_signal['signal']}")
-                st.write(f"- 偏向: {trade_signal['bias']}")
-                st.write(f"- 原因: {trade_signal['rationale']}")
+                st.write(f"- 主交易: {trade_ticket['primary_trade']}")
+                st.write(f"- 仓位: {trade_ticket['position_size']}")
+                st.write(f"- 失效条件: {trade_ticket['invalidation']}")
         with quick_cols[1]:
             st.markdown("**给研究看的背景**")
             st.write("- `coverage_score`: 今天数据完整不完整")

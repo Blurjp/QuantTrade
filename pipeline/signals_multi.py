@@ -10,6 +10,14 @@ import pandas as pd
 import numpy as np
 
 
+def _resolve_value_column(data: pd.DataFrame, preferred: str, fallback: str = "detections") -> Optional[str]:
+    if preferred in data.columns:
+        return preferred
+    if fallback in data.columns:
+        return fallback
+    return None
+
+
 def _seasonal_baseline(
     data: pd.DataFrame,
     value_column: str,
@@ -59,9 +67,10 @@ def generate_chokepoint_signal(
     """
     if throughput_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
-    
-    # Support both 'throughput_index' and 'detections' columns
-    value_column = 'throughput_index' if 'throughput_index' in throughput_data.columns else 'detections'
+
+    value_column = _resolve_value_column(throughput_data, "throughput_index")
+    if value_column is None:
+        return {"signal": "Missing throughput column", "confidence": "Low", "actionability": "Ignore", "trading_action": "FLAT"}
     
     # Calculate rolling baseline
     recent = throughput_data.tail(baseline_window)
@@ -81,21 +90,25 @@ def generate_chokepoint_signal(
         confidence = "High" if zscore < -1.5 else "Medium"
         actionability = "Actionable"
         bias = "Bullish crude / bullish disruption-sensitive assets"
+        trading_action = "LONG"
     elif current_throughput > 1.2 * baseline_mean:
         signal = "Short disruption risk"
         confidence = "High" if zscore > 1.5 else "Medium"
         actionability = "Actionable"
         bias = "Bearish crude risk premium"
+        trading_action = "SHORT"
     else:
         signal = "No trade"
         confidence = "Low"
         actionability = "Ignore"
         bias = "Neutral"
+        trading_action = "FLAT"
     
     return {
         "signal": signal,
         "confidence": confidence,
         "actionability": actionability,
+        "trading_action": trading_action,
         "bias": bias,
         "zscore": zscore,
         "throughput_current": current_throughput,
@@ -116,9 +129,10 @@ def generate_retail_signal(
     """
     if traffic_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
-    
-    # Support both 'vehicle_count' and 'detections' columns
-    value_column = 'vehicle_count' if 'vehicle_count' in traffic_data.columns else 'detections'
+
+    value_column = _resolve_value_column(traffic_data, "vehicle_count")
+    if value_column is None:
+        return {"signal": "Missing traffic column", "confidence": "Low", "actionability": "Ignore", "trading_action": "FLAT"}
     
     # Compare to same period last year (seasonal adjustment)
     current_traffic = traffic_data.iloc[-1][value_column]
@@ -318,9 +332,10 @@ def generate_auto_inventory_signal(
     """
     if inventory_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
-    
-    # Support both 'vehicle_count' and 'detections' columns
-    value_column = 'vehicle_count' if 'vehicle_count' in inventory_data.columns else 'detections'
+
+    value_column = _resolve_value_column(inventory_data, "vehicle_count")
+    if value_column is None:
+        return {"signal": "Missing inventory column", "confidence": "Low", "actionability": "Ignore", "trading_action": "FLAT"}
     
     current_inventory = inventory_data.iloc[-1][value_column]
     

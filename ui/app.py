@@ -326,6 +326,20 @@ def _render_how_to_use(st) -> None:
         )
 
 
+def _load_daily_brief(output_base: str, selected_day: str) -> str:
+    brief_path = Path(output_base) / selected_day / "daily_brief_zh.md"
+    if not brief_path.exists():
+        return ""
+    return brief_path.read_text()
+
+
+def _load_persistence_state(output_base: str) -> dict:
+    state_path = Path(output_base) / "signal_persistence_state.json"
+    if not state_path.exists():
+        return {}
+    return json.loads(state_path.read_text())
+
+
 def main():
     import streamlit as st
 
@@ -398,12 +412,36 @@ def main():
     metric_columns[3].metric("检测到的船只", int(len(detections_df)))
     metric_columns[4].metric("最大时间缺口(小时)", metrics_row.get("max_scene_gap_hours", "n/a"))
 
-    tab_monitor, tab_today, tab_trade, tab_backtests, tab_signal, tab_detections, tab_scenes, tab_files = st.tabs(
-        ["Monitor", "Today", "Trading", "Backtests", "Signal", "Detections", "Previews", "Files"]
+    tab_monitor, tab_brief, tab_today, tab_trade, tab_backtests, tab_signal, tab_detections, tab_scenes, tab_files = st.tabs(
+        ["Monitor", "Brief", "Today", "Trading", "Backtests", "Signal", "Detections", "Previews", "Files"]
     )
 
     with tab_monitor:
         _render_global_monitor(st, regions, output_base)
+
+    with tab_brief:
+        st.markdown("**每日中文简报**")
+        brief_text = _load_daily_brief(output_base, selected_day)
+        if brief_text:
+            st.markdown(brief_text)
+            st.download_button(
+                "Download Chinese Brief",
+                brief_text.encode("utf-8"),
+                file_name=f"{selected_day}_daily_brief_zh.md",
+                mime="text/markdown",
+            )
+        else:
+            st.info("这个日期还没有生成中文简报。先运行 `scripts/china_daily_brief.py` 或 Railway 日任务。")
+
+        dashboard_path = Path(output_base) / selected_day / "signals_dashboard.html"
+        if dashboard_path.exists():
+            st.markdown("**Dashboard 文件**")
+            st.code(str(dashboard_path))
+
+        persistence_state = _load_persistence_state(output_base)
+        if persistence_state:
+            st.markdown("**信号确认状态**")
+            st.json(persistence_state)
 
     with tab_today:
         st.markdown("**今天到底能不能用**")

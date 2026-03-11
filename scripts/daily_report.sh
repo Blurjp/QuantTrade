@@ -42,3 +42,6 @@ python scripts/active_signals_report.py --date "$DATE" --output outputs 2>&1 || 
 
 echo
 python scripts/signals_dashboard.py --date "$DATE" --output outputs 2>&1 || true
+
+echo
+python scripts/china_daily_brief.py --date "$DATE" --output outputs 2>&1 || true

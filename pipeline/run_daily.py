@@ -11,7 +11,7 @@ import json
 from typing import Dict, List, Optional
 import pandas as pd
 
-from pipeline.regions import get_active_regions
+from pipeline.regions import get_active_regions, load_registry
 from pipeline.detection_multi import run_detection
 from pipeline.signals_multi import generate_signal
 from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
@@ -22,6 +22,44 @@ CONFIDENCE_WEIGHTS = {
     "Medium": 0.6,
     "Low": 0.25,
 }
+META_CONFIRMATIONS = 2
+
+
+def _meta_signal_text(group_config: Dict, direction: str) -> str:
+    label = group_config.get("label", "Meta signal")
+    if direction == "LONG":
+        return f"{label} meta-long"
+    if direction == "SHORT":
+        return f"{label} meta-short"
+    return f"{label} meta-neutral"
+
+
+def _meta_bias(group_config: Dict, direction: str) -> str:
+    bullish = group_config.get("bullish_bias", "Bullish prices")
+    bearish = group_config.get("bearish_bias", "Bearish prices")
+    neutral = group_config.get("neutral_bias", "Mixed regional signal")
+    if direction == "LONG":
+        return bullish
+    if direction == "SHORT":
+        return bearish
+    return neutral
+
+
+def _meta_state_file(output_base: str) -> Path:
+    return Path(output_base) / "meta_signals_state.json"
+
+
+def load_meta_state(output_base: str) -> Dict:
+    state_file = _meta_state_file(output_base)
+    if not state_file.exists():
+        return {}
+    return json.loads(state_file.read_text())
+
+
+def save_meta_state(output_base: str, state: Dict) -> None:
+    state_file = _meta_state_file(output_base)
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state, indent=2))
 
 
 def _signal_vote(signal: Dict) -> float:
@@ -31,7 +69,48 @@ def _signal_vote(signal: Dict) -> float:
     return direction * confidence
 
 
-def build_meta_signals(signals: Dict, region_configs: Dict) -> Dict:
+def apply_meta_signal_persistence(raw_signal: Dict, previous_state: Dict, confirmations_required: int = META_CONFIRMATIONS) -> tuple[Dict, Dict]:
+    raw_action = raw_signal.get("trading_action", "FLAT")
+    live_action = previous_state.get("live_action", "FLAT")
+    pending_action = previous_state.get("pending_action", raw_action)
+    pending_count = int(previous_state.get("pending_count", 0))
+
+    if raw_action == live_action:
+        pending_action = raw_action
+        pending_count = 0
+        applied_action = live_action
+    elif raw_action == "FLAT":
+        pending_action = raw_action
+        pending_count = pending_count + 1 if pending_action == raw_action else 1
+        applied_action = "FLAT" if pending_count >= confirmations_required else live_action
+    else:
+        if pending_action == raw_action:
+            pending_count += 1
+        else:
+            pending_action = raw_action
+            pending_count = 1
+        applied_action = raw_action if pending_count >= confirmations_required else live_action
+
+    persisted = dict(raw_signal)
+    if applied_action != raw_action:
+        persisted["signal"] = persisted.get("signal", "Meta signal") + " (pending confirmation)"
+        persisted["actionability"] = "Ignore" if applied_action == "FLAT" else persisted.get("actionability", "Ignore")
+        persisted["confidence"] = "Low"
+    persisted["raw_trading_action"] = raw_action
+    persisted["trading_action"] = applied_action
+    persisted["pending_action"] = pending_action
+    persisted["pending_count"] = pending_count
+    persisted["confirmations_required"] = confirmations_required
+
+    next_state = {
+        "live_action": applied_action,
+        "pending_action": pending_action,
+        "pending_count": pending_count,
+    }
+    return persisted, next_state
+
+
+def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, output_base: str) -> Dict:
     grouped_regions = {}
     for region_id, config in region_configs.items():
         group = config.get("meta_group")
@@ -40,7 +119,10 @@ def build_meta_signals(signals: Dict, region_configs: Dict) -> Dict:
         grouped_regions.setdefault(group, []).append((region_id, config))
 
     meta_signals = {}
+    meta_state = load_meta_state(output_base)
+    next_meta_state = {}
     for group, members in grouped_regions.items():
+        group_config = meta_groups.get(group, {})
         weighted_votes = []
         constituents = []
 
@@ -66,19 +148,13 @@ def build_meta_signals(signals: Dict, region_configs: Dict) -> Dict:
         vote_score = sum(weight * vote for weight, vote in weighted_votes) / total_weight if total_weight else 0.0
 
         if vote_score >= 0.2:
-            trading_action = "LONG"
-            signal_text = "Brazil soy meta-long"
-            bias = "Bullish soybean prices"
+            raw_action = "LONG"
             actionability = "Actionable"
         elif vote_score <= -0.2:
-            trading_action = "SHORT"
-            signal_text = "Brazil soy meta-short"
-            bias = "Bearish soybean prices"
+            raw_action = "SHORT"
             actionability = "Actionable"
         else:
-            trading_action = "FLAT"
-            signal_text = "Brazil soy meta-neutral"
-            bias = "Mixed regional soybean signal"
+            raw_action = "FLAT"
             actionability = "Ignore"
 
         abs_score = abs(vote_score)
@@ -89,18 +165,28 @@ def build_meta_signals(signals: Dict, region_configs: Dict) -> Dict:
         else:
             confidence = "Low"
 
-        meta_signals[f"{group}_meta"] = {
-            "signal": signal_text,
+        raw_signal = {
+            "signal": _meta_signal_text(group_config, raw_action),
             "confidence": confidence,
             "actionability": actionability,
-            "trading_action": trading_action,
-            "type": "meta_agriculture",
-            "instruments": ["Soybeans"],
-            "bias": bias,
+            "trading_action": raw_action,
+            "type": group_config.get("type", "meta_signal"),
+            "instruments": group_config.get("instruments", []),
+            "bias": _meta_bias(group_config, raw_action),
             "meta_group": group,
             "vote_score": vote_score,
             "constituents": constituents,
+            "portfolio_trade": group_config.get("portfolio_trade", True),
         }
+        persisted_signal, persisted_state = apply_meta_signal_persistence(
+            raw_signal,
+            meta_state.get(group, {}),
+            confirmations_required=int(group_config.get("confirmations_required", META_CONFIRMATIONS)),
+        )
+        meta_signals[f"{group}_meta"] = persisted_signal
+        next_meta_state[group] = persisted_state
+
+    save_meta_state(output_base, next_meta_state)
 
     return meta_signals
 
@@ -223,8 +309,10 @@ def run_daily_pipeline(
     """
     if target_date is None:
         target_date = date.today().isoformat()
-    
+
+    registry = load_registry()
     active_regions = get_active_regions()
+    meta_groups = registry.get("meta_groups", {})
     
     if regions_filter:
         active_regions = {
@@ -276,7 +364,7 @@ def run_daily_pipeline(
         print(f"  Status: {status} {result['status']}")
     
     # Save summary
-    signals.update(build_meta_signals(signals, active_regions))
+    signals.update(build_meta_signals(signals, active_regions, meta_groups, output_base))
 
     summary = {
         "date": target_date,
@@ -320,6 +408,8 @@ def update_portfolio_with_signals(
     actions = []
     
     for region_id, signal in signals.items():
+        if signal.get("portfolio_trade") is False:
+            continue
         if signal.get("actionability") != "Actionable":
             continue
         

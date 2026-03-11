@@ -41,6 +41,9 @@
       "type": "retail_parking",
       "aoi_file": "configs/aoi_retail_walmart.geojson",
       "active": true,
+      "portfolio_trade": false,
+      "meta_group": "us_retail",
+      "meta_weight": 0.55,
       "instruments": [
         "WMT"
       ],
@@ -51,6 +54,9 @@
       "type": "retail_parking",
       "aoi_file": "configs/aoi_retail_costco.geojson",
       "active": true,
+      "portfolio_trade": false,
+      "meta_group": "us_retail",
+      "meta_weight": 0.45,
       "instruments": [
         "COST"
       ],
@@ -135,6 +141,7 @@
       "name": "Brazil Soy North",
       "type": "agriculture",
       "active": true,
+      "portfolio_trade": false,
       "description": "Northern Mato Grosso soybean production belt",
       "meta_group": "brazil_soy",
       "meta_weight": 0.35,
@@ -153,6 +160,7 @@
       "name": "Brazil Soy Central",
       "type": "agriculture",
       "active": true,
+      "portfolio_trade": false,
       "description": "Central Mato Grosso soybean production belt",
       "meta_group": "brazil_soy",
       "meta_weight": 0.4,
@@ -171,6 +179,7 @@
       "name": "Brazil Soy Southeast",
       "type": "agriculture",
       "active": true,
+      "portfolio_trade": false,
       "description": "Southeastern Mato Grosso soybean production belt",
       "meta_group": "brazil_soy",
       "meta_weight": 0.25,
@@ -204,6 +213,32 @@
   },
   "active_count": 9,
   "total_count": 13,
+  "meta_groups": {
+    "brazil_soy": {
+      "label": "Brazil soy",
+      "type": "meta_agriculture",
+      "instruments": [
+        "Soybeans"
+      ],
+      "portfolio_trade": true,
+      "confirmations_required": 2,
+      "bullish_bias": "Bullish soybean prices",
+      "bearish_bias": "Bearish soybean prices",
+      "neutral_bias": "Mixed regional soybean signal"
+    },
+    "us_retail": {
+      "label": "US retail",
+      "type": "meta_retail",
+      "instruments": [
+        "XRT"
+      ],
+      "portfolio_trade": true,
+      "confirmations_required": 2,
+      "bullish_bias": "Bullish retail traffic and spending",
+      "bearish_bias": "Bearish retail traffic and spending",
+      "neutral_bias": "Mixed retail traffic signal"
+    }
+  },
   "notes": {
     "detection_status": {
       "chokepoint": "\u2705 Production",

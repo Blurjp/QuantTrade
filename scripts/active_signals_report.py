@@ -35,9 +35,10 @@ def main() -> int:
     headers = [
         format_cell("Region", 24),
         format_cell("Action", 8),
+        format_cell("Raw", 8),
         format_cell("Conf", 6),
         format_cell("Score", 8),
-        format_cell("Signal", 30),
+        format_cell("Signal", 21),
     ]
     print(" ".join(headers))
     print("-" * 79)
@@ -48,9 +49,10 @@ def main() -> int:
         row = [
             format_cell(region_id, 24),
             format_cell(signal.get("trading_action", "FLAT"), 8),
+            format_cell(signal.get("raw_trading_action", signal.get("trading_action", "FLAT")), 8),
             format_cell(signal.get("confidence", "Low"), 6),
             format_cell(f"{score:.3f}" if isinstance(score, (int, float)) else score, 8),
-            format_cell(signal.get("signal", "No data"), 30),
+            format_cell(signal.get("signal", "No data"), 21),
         ]
         print(" ".join(row))
 

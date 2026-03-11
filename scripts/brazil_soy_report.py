@@ -138,6 +138,7 @@ def main() -> int:
         print("Brazil Soy Meta")
         if meta_signal:
             print(f"live action: {meta_signal.get('trading_action')}")
+            print(f"raw action: {meta_signal.get('raw_trading_action', meta_signal.get('trading_action'))}")
             print(f"live confidence: {meta_signal.get('confidence')}")
             print(f"live vote score: {meta_signal.get('vote_score', 0):.3f}")
         if meta_backtest:

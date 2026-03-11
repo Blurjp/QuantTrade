@@ -24,6 +24,121 @@ from pipeline.signals import build_monitor_snapshot, latest_region_signal
 from pipeline.ui_data import list_available_days, load_day_bundle
 
 
+# ---------------------------------------------------------------------------
+# Fidelity ticker mapping
+# System instrument names → Fidelity-searchable ticker codes + beginner notes
+# ---------------------------------------------------------------------------
+FIDELITY_MAP = {
+    # Commodities
+    "Soybeans": {
+        "fidelity_ticker": "SOYB",
+        "type": "ETF",
+        "long_action": "Buy SOYB",
+        "short_action": "Buy SOYB inverse: use WEAT as proxy or avoid (no direct soy inverse ETF)",
+        "beginner_note": "在 Fidelity 搜索 SOYB，点 Buy，选 Market Order。做空方向初学者建议暂时不参与。",
+        "beginner_short_note": "做空大豆没有简单的反向 ETF。建议初学者在做空信号时跳过或只观察。",
+    },
+    "Corn": {
+        "fidelity_ticker": "CORN",
+        "type": "ETF",
+        "long_action": "Buy CORN",
+        "short_action": "Avoid (no liquid inverse; stand aside)",
+        "beginner_note": "在 Fidelity 搜索 CORN，点 Buy，选 Market Order。",
+        "beginner_short_note": "做空玉米没有简单反向 ETF，建议初学者在做空信号时观望。",
+    },
+    # Energy
+    "WTI": {
+        "fidelity_ticker": "USO",
+        "type": "ETF",
+        "long_action": "Buy USO (or XLE for sector exposure)",
+        "short_action": "Buy SCO (2× inverse crude) — small size only",
+        "beginner_note": "在 Fidelity 搜索 USO，点 Buy，选 Market Order。能源板块也可以用 XLE。",
+        "beginner_short_note": "做空原油可以搜 SCO（反向2倍），但波动很大，只用极小仓位试。",
+    },
+    "Brent": {
+        "fidelity_ticker": "BNO",
+        "type": "ETF",
+        "long_action": "Buy BNO",
+        "short_action": "Buy SCO as crude proxy inverse — small size only",
+        "beginner_note": "在 Fidelity 搜索 BNO，点 Buy，选 Market Order。",
+        "beginner_short_note": "布伦特无直接反向 ETF，做空信号时可参考 SCO，仓位需极轻。",
+    },
+    # US Retail
+    "US retail": {
+        "fidelity_ticker": "XRT",
+        "type": "ETF",
+        "long_action": "Buy XRT",
+        "short_action": "Buy SZK (inverse consumer discretionary) or avoid",
+        "beginner_note": "在 Fidelity 搜索 XRT，点 Buy，选 Market Order。",
+        "beginner_short_note": "做空零售可以搜 SZK，但流动性一般，建议初学者观望。",
+    },
+    # Individual stocks
+    "WMT": {
+        "fidelity_ticker": "WMT",
+        "type": "Stock",
+        "long_action": "Buy WMT",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 WMT（沃尔玛），点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+    "COST": {
+        "fidelity_ticker": "COST",
+        "type": "Stock",
+        "long_action": "Buy COST",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 COST（好市多），点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+    "F": {
+        "fidelity_ticker": "F",
+        "type": "Stock",
+        "long_action": "Buy F (Ford)",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 F（福特），点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+    "GM": {
+        "fidelity_ticker": "GM",
+        "type": "Stock",
+        "long_action": "Buy GM (General Motors)",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 GM（通用汽车），点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+    "FDX": {
+        "fidelity_ticker": "FDX",
+        "type": "Stock",
+        "long_action": "Buy FDX (FedEx)",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 FDX（联邦快递），点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+    "UPS": {
+        "fidelity_ticker": "UPS",
+        "type": "Stock",
+        "long_action": "Buy UPS",
+        "short_action": "Avoid short for beginners (requires margin)",
+        "beginner_note": "在 Fidelity 搜索 UPS，点 Buy，选 Market Order。",
+        "beginner_short_note": "股票做空需要保证金账户，初学者建议不参与。",
+    },
+}
+
+
+def _fidelity_info(instrument: str) -> Dict:
+    """Return Fidelity mapping for a given instrument name, with safe fallback."""
+    return FIDELITY_MAP.get(
+        instrument,
+        {
+            "fidelity_ticker": instrument,
+            "type": "Unknown",
+            "long_action": f"Search '{instrument}' on Fidelity",
+            "short_action": "Avoid short for beginners",
+            "beginner_note": f"在 Fidelity 搜索 {instrument}。",
+            "beginner_short_note": "做空建议初学者暂时不参与。",
+        },
+    )
+
+
 def _format_pct(value: Optional[float]) -> str:
     if value is None or pd.isna(value):
         return "n/a"
@@ -254,9 +369,10 @@ def _render_summary_header(
     metrics_row: Dict,
     summary_day: Optional[str] = None,
 ) -> None:
-    st.subheader(f"交易结论 | 区域 {selected_day}")
+    primary_day = summary_day or selected_day
+    st.subheader(f"交易结论 | {primary_day}")
     if summary_day and summary_day != selected_day:
-        st.caption(f"首页全局排序日期: {summary_day} | 当前区域详情日期: {selected_day}")
+        st.caption(f"当前区域详情数据日期: {selected_day} | 首页主日期使用全局最新汇总 {summary_day}")
 
     if trade_signal is None:
         st.warning("当前没有可用的校准信号，暂时不能给出交易结论。")
@@ -525,6 +641,158 @@ def _build_instrument_rankings(ranked: List[Tuple[str, Dict]]) -> List[Dict]:
     return sorted(rows, key=lambda item: (0 if item["stance"] != "MIXED" else 1, -abs(item["score"])))
 
 
+def _overall_daily_verdict(actionable: List[Tuple[str, Dict]], instrument_rows: List[Dict]) -> Dict:
+    if actionable:
+        top_region, top_signal = actionable[0]
+        top_instrument = instrument_rows[0]["instrument"] if instrument_rows else ", ".join(top_signal.get("instruments", []))
+        return {
+            "label": "TRADE",
+            "reason": f"今天有明确可执行信号，优先关注 {top_region} / {top_instrument}。",
+        }
+
+    if any(row["stance"] != "MIXED" for row in instrument_rows):
+        return {
+            "label": "WATCH",
+            "reason": "今天有一些方向性线索，但还没有形成足够清晰的一致性交易。",
+        }
+
+    return {
+        "label": "NO TRADE",
+        "reason": "今天全局没有形成清晰的一致性优势，优先观望。",
+    }
+
+
+def _beginner_verdict_guide(verdict: Dict, actionable: List[Tuple[str, Dict]], instrument_rows: List[Dict]) -> Dict:
+    label = verdict["label"]
+    if label == "TRADE":
+        top_region, top_signal = actionable[0]
+        instrument = ", ".join(top_signal.get("instruments", [])) or top_region
+        return {
+            "title": "如果你是新手，今天怎么做",
+            "steps": [
+                f"第一步：只看 `{instrument}`，不要同时做很多标的。",
+                f"第二步：方向只按系统给的 `{top_signal.get('trading_action')}` 做，不要自己反着猜。",
+                "第三步：等开盘后 15-30 分钟，确认不是一开盘的假突破，再考虑进场。",
+                "第四步：第一次仓位只用你原计划仓位的 25%-33%，不要满仓。",
+                "第五步：如果当天信号转成 FLAT，或者第二天首页统一结论不再支持这笔交易，就退出。",
+            ],
+            "warning": "今天虽然可以交易，但这不是满仓信号。先小仓位，先活下来，比赚快钱更重要。",
+        }
+    if label == "WATCH":
+        focused = instrument_rows[0]["instrument"] if instrument_rows else "当前候选标的"
+        return {
+            "title": "如果你是新手，今天怎么做",
+            "steps": [
+                f"第一步：把 `{focused}` 放进观察名单，但今天先不要急着下单。",
+                "第二步：等下一次日更，看它是否从 WATCH 升级成 TRADE。",
+                "第三步：今天最多做笔记，记录你本来想怎么做，但不要真实重仓。",
+                "第四步：如果你一定要试，只允许极小试仓，并且要接受它更像练习单，不是高把握单。",
+                "第五步：如果你看不懂为什么是 WATCH，那就等，不做就是最好的动作。",
+            ],
+            "warning": "WATCH 的意思不是马上交易，而是『方向有味道，但还不够成熟』。",
+        }
+    return {
+        "title": "如果你是新手，今天怎么做",
+        "steps": [
+            "第一步：今天不要主动开新仓。",
+            "第二步：如果你手里已经有仓位，优先检查它是不是还被系统支持。",
+            "第三步：把今天当成复盘日，看看哪些区域互相打架、为什么系统不给统一方向。",
+            "第四步：等下一次日更，不要为了交易而交易。",
+            "第五步：如果你今天特别想下单，那通常就是最不该下单的时候。",
+        ],
+        "warning": "NO TRADE 不是错过机会，而是系统在帮你避免低胜率、低一致性的交易。",
+    }
+
+
+def _professional_verdict_guide(verdict: Dict, actionable: List[Tuple[str, Dict]], instrument_rows: List[Dict]) -> Dict:
+    label = verdict["label"]
+    if label == "TRADE":
+        top_region, top_signal = actionable[0]
+        instrument = ", ".join(top_signal.get("instruments", [])) or top_region
+        return {
+            "title": "专业版说明",
+            "points": [
+                f"Primary setup: focus on `{instrument}` sourced from `{top_region}`.",
+                f"Execution bias: keep to `{top_signal.get('trading_action')}` only; do not fade the system signal.",
+                "Entry protocol: wait for opening volatility to settle before initiating risk.",
+                "Risk sizing: start with reduced size and scale only if follow-through confirms the thesis.",
+                "Invalidation: exit if the signal degrades to FLAT or the next daily update removes support.",
+            ],
+        }
+    if label == "WATCH":
+        focused = instrument_rows[0]["instrument"] if instrument_rows else "candidate instrument"
+        return {
+            "title": "专业版说明",
+            "points": [
+                f"Current state: `{focused}` shows directional bias but lacks full confirmation.",
+                "Execution protocol: observation only unless a later update upgrades the setup.",
+                "Sizing rule: if traded at all, treat as exploratory risk, not core risk.",
+                "Confirmation trigger: wait for stronger cross-region or cross-signal alignment.",
+                "Main mistake to avoid: forcing an early trade before the edge is mature.",
+            ],
+        }
+    return {
+        "title": "专业版说明",
+        "points": [
+            "Portfolio stance: remain flat on new risk.",
+            "Use the day for observation, review, and preparation rather than execution.",
+            "Lack of alignment means expected edge is not strong enough.",
+            "Capital preservation takes priority over activity.",
+            "Reassess only after the next daily signal update.",
+        ],
+    }
+
+
+def _instrument_playbook(row: Dict) -> Dict:
+    recommendation = "Trade" if row["stance"] in {"LONG", "SHORT"} and abs(row["score"]) >= 0.35 else "Watch" if row["stance"] != "MIXED" else "No Trade"
+    if recommendation == "Trade":
+        direction_cn = "做多" if row["stance"] == "LONG" else "做空"
+        return {
+            "today": recommendation,
+            "how": f"今天只考虑 {direction_cn} `{row['instrument']}`，并用小仓位试单。",
+            "entry": "等开盘后波动稍微稳定，再按方向进场，不追第一根大波动。",
+            "risk": "如果日内走势明显反着走，或者明天统一结论不再支持它，就退出。",
+        }
+    if recommendation == "Watch":
+        return {
+            "today": recommendation,
+            "how": f"`{row['instrument']}` 今天有方向感，但还不够强，先观察。",
+            "entry": "先不进场，等它升级到更清晰的 Trade。",
+            "risk": "最大风险不是错过，而是太早进场。",
+        }
+    return {
+        "today": recommendation,
+        "how": f"`{row['instrument']}` 今天没有足够优势，不建议开仓。",
+        "entry": "不进场。",
+        "risk": "把注意力放到更清晰的标的上。",
+    }
+
+
+def _instrument_playbook_pro(row: Dict) -> Dict:
+    recommendation = "Trade" if row["stance"] in {"LONG", "SHORT"} and abs(row["score"]) >= 0.35 else "Watch" if row["stance"] != "MIXED" else "No Trade"
+    if recommendation == "Trade":
+        direction = "long" if row["stance"] == "LONG" else "short"
+        return {
+            "today": recommendation,
+            "how": f"Bias: {direction} `{row['instrument']}` with controlled initial size.",
+            "entry": "Avoid first impulse entries; wait for price acceptance after the open.",
+            "risk": "Cut the position if the signal loses support or price action rejects the thesis.",
+        }
+    if recommendation == "Watch":
+        return {
+            "today": recommendation,
+            "how": f"Directional lean exists in `{row['instrument']}`, but confirmation is incomplete.",
+            "entry": "No immediate execution; monitor for upgrade.",
+            "risk": "Premature entries are the primary risk.",
+        }
+    return {
+        "today": recommendation,
+        "how": f"No sufficient edge in `{row['instrument']}` right now.",
+        "entry": "Stand aside.",
+        "risk": "Opportunity cost is acceptable; forcing trades is not.",
+    }
+
+
 def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base: str) -> None:
     st.markdown("## 今日该交易什么")
     if not summary:
@@ -553,7 +821,26 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         if region_id.endswith("_meta") and signal.get("trading_action") == "FLAT"
     ]
 
+    instrument_rows = _build_instrument_rankings(ranked)
+    verdict = _overall_daily_verdict(actionable, instrument_rows)
+    beginner_guide = _beginner_verdict_guide(verdict, actionable, instrument_rows)
+    professional_guide = _professional_verdict_guide(verdict, actionable, instrument_rows)
+
     brief_sections = _parse_brief_sections(_load_daily_brief(output_base, summary_day))
+
+    verdict_bg = {"TRADE": "#e6f6ea", "WATCH": "#fff3d9", "NO TRADE": "#f4f1ea"}.get(verdict["label"], "#f4f1ea")
+    verdict_accent = {"TRADE": "#176b3a", "WATCH": "#9a6500", "NO TRADE": "#6f6555"}.get(verdict["label"], "#6f6555")
+
+    st.markdown(
+        f"""
+        <div style="background:{verdict_bg}; border:1px solid #d8cfbf; border-radius:18px; padding:18px 22px; margin:8px 0 18px;">
+          <div style="font-size:12px; letter-spacing:.12em; color:{verdict_accent}; font-weight:700;">UNIFIED DAILY VERDICT</div>
+          <div style="font-size:36px; font-weight:800; color:#1f2a2e; margin-top:8px;">{verdict['label']}</div>
+          <div style="font-size:16px; color:#46545b; margin-top:8px;">{verdict['reason']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     top_cols = st.columns(4)
     top_cols[0].metric("今日可交易", len(actionable))
@@ -581,8 +868,41 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         detail_cols[0].markdown(f"**主交易摘要**\n\n{primary_plan['summary']}")
         detail_cols[1].markdown(f"**Entry**\n\n{primary_plan['entry']}")
         detail_cols[2].markdown(f"**Risk / Invalidation**\n\n{primary_plan['risk']}\n\n{primary_plan['invalidation']}")
+
+        # Fidelity step-by-step for top trade
+        top_instrument_name = top_signal.get("instruments", [""])[0]
+        if top_instrument_name:
+            fi_top = _fidelity_info(top_instrument_name)
+            is_short_top = top_signal.get("trading_action") == "SHORT"
+            fidelity_ticker_top = fi_top["fidelity_ticker"]
+            fidelity_action_top = fi_top["short_action"] if is_short_top else fi_top["long_action"]
+            beginner_cn_top = fi_top["beginner_short_note"] if is_short_top else fi_top["beginner_note"]
+            with st.expander(f"如何在 Fidelity 下单 — {top_instrument_name} ({fidelity_ticker_top})", expanded=True):
+                st.markdown(
+                    f"**Fidelity 代码:** `{fidelity_ticker_top}` ({fi_top['type']})\n\n"
+                    f"**操作:** {fidelity_action_top}\n\n"
+                    f"**初学者中文步骤：**\n\n"
+                    f"1. 登录 Fidelity 账户\n"
+                    f"2. 顶部搜索框输入 `{fidelity_ticker_top}`\n"
+                    f"3. 点击 **Trade / Buy**\n"
+                    f"4. 选 **Market Order**（市价单），输入股数（建议先只买 1 股试手感）\n"
+                    f"5. 确认方向后点 **Preview Order → Place Order**\n\n"
+                    f"{beginner_cn_top}"
+                )
     else:
         st.warning("今天没有明确的一致性系统交易，优先观望。")
+
+    with st.expander("今天怎么交易（专业版 + 直白中文版）", expanded=True):
+        guide_cols = st.columns(2)
+        with guide_cols[0]:
+            st.markdown(f"**{professional_guide['title']}**")
+            for idx, point in enumerate(professional_guide["points"], start=1):
+                st.write(f"{idx}. {point}")
+        with guide_cols[1]:
+            st.markdown(f"**{beginner_guide['title']}**")
+            for idx, step in enumerate(beginner_guide["steps"], start=1):
+                st.write(f"{idx}. {step}")
+            st.info(beginner_guide["warning"])
 
     hero_cols = st.columns(3)
     featured = actionable[:2] + pending[:1]
@@ -603,7 +923,59 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
                 for line in lines[:5]:
                     st.write(line)
 
-    st.markdown("**排序后的今日交易清单**")
+    if instrument_rows:
+        st.markdown("**按标的的统一判断 + Fidelity 操作指引**")
+        instrument_display = []
+        for row in instrument_rows:
+            recommendation = "Trade" if row["stance"] in {"LONG", "SHORT"} and abs(row["score"]) >= 0.35 else "Watch" if row["stance"] != "MIXED" else "No Trade"
+            fi = _fidelity_info(row["instrument"])
+            if row["stance"] == "SHORT":
+                fidelity_action = fi["short_action"]
+            elif row["stance"] == "LONG":
+                fidelity_action = fi["long_action"]
+            else:
+                fidelity_action = "观望 / Stand aside"
+            instrument_display.append(
+                {
+                    "instrument": row["instrument"],
+                    "Fidelity代码": fi["fidelity_ticker"],
+                    "类型": fi["type"],
+                    "今日建议": recommendation,
+                    "方向": row["stance"],
+                    "score": row["score"],
+                    "Fidelity操作": fidelity_action,
+                    "support": row["support"],
+                }
+            )
+        st.dataframe(pd.DataFrame(instrument_display), width="stretch")
+
+        st.markdown("**怎么在 Fidelity 下单（专业版 + 直白中文版）**")
+        playbook_cols = st.columns(min(3, len(instrument_rows)))
+        for idx, row in enumerate(instrument_rows[:3]):
+            guide = _instrument_playbook(row)
+            pro_guide = _instrument_playbook_pro(row)
+            fi = _fidelity_info(row["instrument"])
+            is_short = row["stance"] == "SHORT"
+            beginner_cn = fi["beginner_short_note"] if is_short else fi["beginner_note"]
+            fidelity_ticker = fi["fidelity_ticker"]
+            fidelity_action = fi["short_action"] if is_short else fi["long_action"]
+            with playbook_cols[idx]:
+                st.markdown(
+                    f"**{row['instrument']} ({fidelity_ticker}) | {guide['today']}**\n\n"
+                    f"**专业版**\n"
+                    f"- Bias: {row['stance']}\n"
+                    f"- Fidelity操作: {fidelity_action}\n"
+                    f"- Execution: {pro_guide['how']}\n"
+                    f"- Entry: {pro_guide['entry']}\n"
+                    f"- Risk: {pro_guide['risk']}\n\n"
+                    f"**直白版（初学者）**\n"
+                    f"- {beginner_cn}\n"
+                    f"- 怎么做: {guide['how']}\n"
+                    f"- 入场: {guide['entry']}\n"
+                    f"- 风险: {guide['risk']}"
+                )
+
+    st.markdown("**区域明细（解释原因，不是首页最终结论）**")
     display_rows = []
     for region_id, signal in ranked:
         score = signal.get("vote_score")
@@ -622,11 +994,6 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
             }
         )
     st.dataframe(pd.DataFrame(display_rows), width="stretch")
-
-    instrument_rows = _build_instrument_rankings(ranked)
-    if instrument_rows:
-        st.markdown("**按交易标的聚合后的方向排名**")
-        st.dataframe(pd.DataFrame(instrument_rows), width="stretch")
 
     if pending:
         st.markdown("**正在确认，不要急着下单**")
@@ -706,7 +1073,8 @@ def main():
     daily_summary = _load_daily_summary(output_base, selected_day)
 
     _render_ranked_today_board(st, selected_day, daily_summary, output_base)
-    _render_summary_header(st, selected_day, trade_signal, metrics_row, summary_day=summary_day)
+    with st.expander("当前区域详情", expanded=False):
+        _render_summary_header(st, selected_day, trade_signal, metrics_row, summary_day=summary_day)
     _render_trade_ticket(st, trade_ticket)
     _render_how_to_use(st)
 

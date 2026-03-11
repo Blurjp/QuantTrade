@@ -4,22 +4,23 @@ Instrument mapping helpers for region-aware trading recommendations.
 
 import json
 from pathlib import Path
+from typing import Dict, List, Optional, Union
 
 
 INSTRUMENTS_PATH = Path("configs/instruments.json")
 
 
-def load_instrument_registry(path: str | Path = INSTRUMENTS_PATH) -> dict:
+def load_instrument_registry(path: Union[str, Path] = INSTRUMENTS_PATH) -> Dict:
     with open(path) as f:
         return json.load(f)
 
 
 def list_region_instruments(
     region_id: str,
-    enabled_for_backtest: bool | None = None,
-    enabled_for_alerts: bool | None = None,
-    path: str | Path = INSTRUMENTS_PATH,
-) -> list[dict]:
+    enabled_for_backtest: Optional[bool] = None,
+    enabled_for_alerts: Optional[bool] = None,
+    path: Union[str, Path] = INSTRUMENTS_PATH,
+) -> List[Dict]:
     registry = load_instrument_registry(path)
     instruments = list(registry.get("regions", {}).get(region_id, []))
 
@@ -40,7 +41,7 @@ def list_region_instruments(
     return instruments
 
 
-def get_primary_instrument(region_id: str, path: str | Path = INSTRUMENTS_PATH) -> dict | None:
+def get_primary_instrument(region_id: str, path: Union[str, Path] = INSTRUMENTS_PATH) -> Optional[Dict]:
     instruments = list_region_instruments(region_id, path=path)
     for instrument in instruments:
         if instrument.get("primary"):

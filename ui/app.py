@@ -7,6 +7,12 @@ Run with:
 
 from pathlib import Path
 import json
+import sys
+from typing import Dict, List, Optional, Tuple
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 import requests
@@ -18,19 +24,19 @@ from pipeline.signals import build_monitor_snapshot, latest_region_signal
 from pipeline.ui_data import list_available_days, load_day_bundle
 
 
-def _format_pct(value: float | None) -> str:
+def _format_pct(value: Optional[float]) -> str:
     if value is None or pd.isna(value):
         return "n/a"
     return f"{value:.1%}"
 
 
-def _format_num(value: float | None, digits: int = 3) -> str:
+def _format_num(value: Optional[float], digits: int = 3) -> str:
     if value is None or pd.isna(value):
         return "n/a"
     return f"{value:.{digits}f}"
 
 
-def _signal_style(signal: str) -> tuple[str, str]:
+def _signal_style(signal: str) -> Tuple[str, str]:
     if signal == "Long disruption risk":
         return "error", "偏多原油风险溢价"
     if signal == "Short disruption risk":
@@ -48,7 +54,7 @@ def _confidence_note(confidence: str) -> str:
     return "今天没有足够数据。"
 
 
-def _coverage_confidence(coverage_score: float | None) -> str:
+def _coverage_confidence(coverage_score: Optional[float]) -> str:
     if coverage_score is None or pd.isna(coverage_score):
         return "Unknown"
     if coverage_score >= 0.75:
@@ -58,7 +64,7 @@ def _coverage_confidence(coverage_score: float | None) -> str:
     return "Low"
 
 
-def _build_trade_ticket(trade_signal: dict | None, region_instruments: list[dict]) -> dict | None:
+def _build_trade_ticket(trade_signal: Optional[Dict], region_instruments: List[Dict]) -> Optional[Dict]:
     if trade_signal is None:
         return None
 
@@ -178,7 +184,7 @@ def _load_remote_bundle(api_base: str, selected_day: str, output_base: str, regi
         "calibration_metrics": pd.DataFrame(calibration_payload["metrics"]),
         "calibration_report": calibration_payload["report"],
     }
-def _render_global_monitor(st, regions: list[dict], output_base: str) -> None:
+def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
     monitor_df = build_monitor_snapshot(output_base=output_base)
     if monitor_df.empty:
         st.info("No regional runs available yet.")
@@ -228,7 +234,7 @@ def _render_global_monitor(st, regions: list[dict], output_base: str) -> None:
     st.dataframe(display_df, width="stretch")
 
 
-def _load_latest_backtests(output_base: str, region_id: str) -> list[dict]:
+def _load_latest_backtests(output_base: str, region_id: str) -> List[Dict]:
     backtest_root = Path(output_base) / "regions" / region_id / "backtests"
     if not backtest_root.exists():
         return []
@@ -241,8 +247,16 @@ def _load_latest_backtests(output_base: str, region_id: str) -> list[dict]:
     return summaries
 
 
-def _render_summary_header(st, selected_day: str, trade_signal: dict | None, metrics_row: dict) -> None:
-    st.subheader(f"交易结论 | {selected_day}")
+def _render_summary_header(
+    st,
+    selected_day: str,
+    trade_signal: Optional[Dict],
+    metrics_row: Dict,
+    summary_day: Optional[str] = None,
+) -> None:
+    st.subheader(f"交易结论 | 区域 {selected_day}")
+    if summary_day and summary_day != selected_day:
+        st.caption(f"首页全局排序日期: {summary_day} | 当前区域详情日期: {selected_day}")
 
     if trade_signal is None:
         st.warning("当前没有可用的校准信号，暂时不能给出交易结论。")
@@ -283,7 +297,7 @@ def _render_summary_header(st, selected_day: str, trade_signal: dict | None, met
     )
 
 
-def _render_trade_ticket(st, trade_ticket: dict | None) -> None:
+def _render_trade_ticket(st, trade_ticket: Optional[Dict]) -> None:
     st.markdown("**交易指令页**")
     if trade_ticket is None:
         st.info("今天没有足够信号生成交易指令。")
@@ -340,6 +354,294 @@ def _load_persistence_state(output_base: str) -> dict:
     return json.loads(state_path.read_text())
 
 
+def _load_daily_summary(output_base: str, selected_day: str) -> Dict:
+    summary_path = Path(output_base) / selected_day / "daily_summary.json"
+    if not summary_path.exists():
+        output_root = Path(output_base)
+        candidates = sorted(
+            path for path in output_root.glob("*/daily_summary.json")
+            if path.parent.name[:4].isdigit()
+        )
+        if candidates:
+            return json.loads(candidates[-1].read_text())
+        return {}
+    return json.loads(summary_path.read_text())
+
+
+def _resolve_summary_day(output_base: str, selected_day: str) -> str:
+    summary_path = Path(output_base) / selected_day / "daily_summary.json"
+    if summary_path.exists():
+        return selected_day
+
+    output_root = Path(output_base)
+    candidates = sorted(
+        path.parent.name for path in output_root.glob("*/daily_summary.json")
+        if path.parent.name[:4].isdigit()
+    )
+    return candidates[-1] if candidates else selected_day
+
+
+def _parse_brief_sections(brief_text: str) -> Dict[str, List[str]]:
+    sections: Dict[str, List[str]] = {}
+    current = ""
+    for raw_line in brief_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("## "):
+            current = line[3:]
+            sections[current] = []
+            continue
+        if current and line:
+            sections[current].append(line)
+    return sections
+
+
+def _action_theme(action: str) -> Tuple[str, str]:
+    if action == "LONG":
+        return "#dff6e8", "#0d6b3c"
+    if action == "SHORT":
+        return "#fde7e7", "#9f1d1d"
+    return "#f3efe3", "#6b5a2a"
+
+
+def _render_signal_card(st, region_id: str, signal: Dict) -> None:
+    bg, accent = _action_theme(signal.get("trading_action", "FLAT"))
+    score = signal.get("vote_score")
+    if score is None:
+        score = signal.get("ndvi_change", "")
+    score_text = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+    instruments = ", ".join(signal.get("instruments", [])) or "n/a"
+    st.markdown(
+        f"""
+        <div style="background:{bg}; border-left:6px solid {accent}; padding:16px 18px; border-radius:14px; min-height:180px;">
+          <div style="font-size:12px; letter-spacing:.08em; color:{accent}; font-weight:700;">{region_id}</div>
+          <div style="font-size:30px; font-weight:800; color:#1f2a2e; margin-top:6px;">{signal.get('trading_action', 'FLAT')}</div>
+          <div style="font-size:14px; color:#44525a; margin-top:4px;">{signal.get('confidence', 'Low')} / {signal.get('actionability', 'Ignore')}</div>
+          <div style="font-size:16px; color:#1f2a2e; margin-top:10px; font-weight:600;">{signal.get('signal', 'No data')}</div>
+          <div style="font-size:13px; color:#44525a; margin-top:8px;">标的: {instruments}</div>
+          <div style="font-size:13px; color:#44525a; margin-top:4px;">score: {score_text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _signal_rank(signal: Dict) -> Tuple[int, int, float]:
+    actionability_rank = {"Actionable": 0, "Watchlist": 1, "Ignore": 2}
+    confidence_rank = {"High": 0, "Medium": 1, "Low": 2}
+    score = signal.get("vote_score")
+    if score is None:
+        score = abs(float(signal.get("ndvi_change", 0.0) or 0.0))
+    return (
+        actionability_rank.get(signal.get("actionability", "Ignore"), 9),
+        confidence_rank.get(signal.get("confidence", "Low"), 9),
+        -float(score),
+    )
+
+
+def _build_primary_trade_plan(region_id: str, signal: Dict) -> Dict:
+    instruments = signal.get("instruments", [])
+    ticker = instruments[0] if instruments else "n/a"
+    action = signal.get("trading_action", "FLAT")
+    confidence = signal.get("confidence", "Low")
+    signal_text = signal.get("signal", "No data")
+
+    if action == "LONG":
+        return {
+            "region": region_id,
+            "ticker": ticker,
+            "action": action,
+            "entry": "下个交易时段优先找回踩后做多，不追第一根冲高。",
+            "risk": "若信号回落到 FLAT 或次日原始方向消失，缩仓或退出。",
+            "invalidation": "若系统确认状态丢失，或元信号继续维持观望，则这笔交易失效。",
+            "summary": f"{ticker} 偏多，{confidence}，理由: {signal_text}",
+        }
+    if action == "SHORT":
+        return {
+            "region": region_id,
+            "ticker": ticker,
+            "action": action,
+            "entry": "下个交易时段优先找反弹衰竭后做空，不追开盘直接跳空。",
+            "risk": "若信号回落到 FLAT 或次日原始方向消失，缩仓或退出。",
+            "invalidation": "若系统确认状态丢失，或元信号继续维持观望，则这笔交易失效。",
+            "summary": f"{ticker} 偏空，{confidence}，理由: {signal_text}",
+        }
+    return {
+        "region": region_id,
+        "ticker": ticker,
+        "action": action,
+        "entry": "今天不主动开仓。",
+        "risk": "保持轻仓或空仓，等待更一致的确认。",
+        "invalidation": "只有当系统升级到 Actionable 且方向明确时才重新考虑。",
+        "summary": f"{ticker} 暂无主交易，理由: {signal_text}",
+    }
+
+
+def _build_instrument_rankings(ranked: List[Tuple[str, Dict]]) -> List[Dict]:
+    grouped: Dict[str, Dict] = {}
+    confidence_weight = {"High": 1.0, "Medium": 0.6, "Low": 0.25}
+
+    for region_id, signal in ranked:
+        instruments = signal.get("instruments", [])
+        if not instruments:
+            continue
+        action = signal.get("trading_action", "FLAT")
+        direction = 1.0 if action == "LONG" else -1.0 if action == "SHORT" else 0.0
+        weight = confidence_weight.get(signal.get("confidence", "Low"), 0.25)
+        for instrument in instruments:
+            bucket = grouped.setdefault(
+                instrument,
+                {"instrument": instrument, "score": 0.0, "regions": [], "longs": 0, "shorts": 0, "flats": 0},
+            )
+            bucket["score"] += direction * weight
+            bucket["regions"].append(f"{region_id}:{action}")
+            if action == "LONG":
+                bucket["longs"] += 1
+            elif action == "SHORT":
+                bucket["shorts"] += 1
+            else:
+                bucket["flats"] += 1
+
+    rows = []
+    for instrument, bucket in grouped.items():
+        score = bucket["score"]
+        if score > 0.35:
+            stance = "LONG"
+        elif score < -0.35:
+            stance = "SHORT"
+        else:
+            stance = "MIXED"
+        rows.append(
+            {
+                "instrument": instrument,
+                "stance": stance,
+                "score": round(score, 3),
+                "support": ", ".join(bucket["regions"][:4]),
+                "longs": bucket["longs"],
+                "shorts": bucket["shorts"],
+                "flats": bucket["flats"],
+            }
+        )
+
+    return sorted(rows, key=lambda item: (0 if item["stance"] != "MIXED" else 1, -abs(item["score"])))
+
+
+def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base: str) -> None:
+    st.markdown("## 今日该交易什么")
+    if not summary:
+        st.info("这个日期没有 daily_summary.json，无法生成全局排序。")
+        return
+
+    summary_day = _resolve_summary_day(output_base, selected_day)
+    if summary_day != selected_day:
+        st.caption(f"当前区域日期 `{selected_day}` 没有全局汇总，首页排序改为使用最近一次全局汇总 `{summary_day}`。")
+
+    signals = summary.get("signals", {})
+    if not signals:
+        st.info("当天没有可用信号。")
+        return
+
+    ranked = sorted(signals.items(), key=lambda item: _signal_rank(item[1]))
+    actionable = [(region_id, signal) for region_id, signal in ranked if signal.get("actionability") == "Actionable"]
+    pending = [
+        (region_id, signal)
+        for region_id, signal in ranked
+        if signal.get("raw_trading_action") not in {None, "FLAT"} and signal.get("trading_action") == "FLAT"
+    ]
+    blocked = [
+        (region_id, signal)
+        for region_id, signal in ranked
+        if region_id.endswith("_meta") and signal.get("trading_action") == "FLAT"
+    ]
+
+    brief_sections = _parse_brief_sections(_load_daily_brief(output_base, summary_day))
+
+    top_cols = st.columns(4)
+    top_cols[0].metric("今日可交易", len(actionable))
+    top_cols[1].metric("确认中", len(pending))
+    top_cols[2].metric("系统观望", len(blocked))
+    top_cols[3].metric("运行成功", f"{summary.get('regions_successful', 0)}/{summary.get('regions_processed', 0)}")
+
+    if actionable:
+        top_region, top_signal = actionable[0]
+        instruments = ", ".join(top_signal.get("instruments", [])) or "n/a"
+        bg, accent = _action_theme(top_signal.get("trading_action", "FLAT"))
+        primary_plan = _build_primary_trade_plan(top_region, top_signal)
+        st.markdown(
+            f"""
+            <div style="background:linear-gradient(135deg, {bg}, #fffdf7); border:1px solid #d9cfbb; border-radius:18px; padding:20px 24px; margin:8px 0 18px;">
+              <div style="font-size:12px; letter-spacing:.12em; color:{accent}; font-weight:700;">TODAY'S TOP TRADE</div>
+              <div style="font-size:34px; font-weight:800; color:#1f2a2e; margin-top:8px;">{top_region} → {top_signal.get('trading_action')}</div>
+              <div style="font-size:18px; color:#334047; margin-top:6px;">{top_signal.get('signal')}</div>
+              <div style="font-size:14px; color:#5d6970; margin-top:10px;">标的: {instruments} | 置信度: {top_signal.get('confidence')} | actionability: {top_signal.get('actionability')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        detail_cols = st.columns(3)
+        detail_cols[0].markdown(f"**主交易摘要**\n\n{primary_plan['summary']}")
+        detail_cols[1].markdown(f"**Entry**\n\n{primary_plan['entry']}")
+        detail_cols[2].markdown(f"**Risk / Invalidation**\n\n{primary_plan['risk']}\n\n{primary_plan['invalidation']}")
+    else:
+        st.warning("今天没有明确的一致性系统交易，优先观望。")
+
+    hero_cols = st.columns(3)
+    featured = actionable[:2] + pending[:1]
+    if not featured:
+        featured = ranked[:3]
+    for idx, (region_id, signal) in enumerate(featured[:3]):
+        with hero_cols[idx]:
+            _render_signal_card(st, region_id, signal)
+
+    if brief_sections:
+        st.markdown("**中文简报摘录**")
+        brief_cols = st.columns(3)
+        section_names = ["今日可交易", "今日不可交易", "今日观察名单"]
+        for idx, section_name in enumerate(section_names):
+            with brief_cols[idx]:
+                st.markdown(f"**{section_name}**")
+                lines = brief_sections.get(section_name, ["- 无"])
+                for line in lines[:5]:
+                    st.write(line)
+
+    st.markdown("**排序后的今日交易清单**")
+    display_rows = []
+    for region_id, signal in ranked:
+        score = signal.get("vote_score")
+        if score is None:
+            score = signal.get("ndvi_change", "")
+        display_rows.append(
+            {
+                "rank_region": region_id,
+                "action": signal.get("trading_action", "FLAT"),
+                "raw": signal.get("raw_trading_action", signal.get("trading_action", "FLAT")),
+                "confidence": signal.get("confidence", "Low"),
+                "actionability": signal.get("actionability", "Ignore"),
+                "instrument": ", ".join(signal.get("instruments", [])),
+                "signal": signal.get("signal", "No data"),
+                "score": score,
+            }
+        )
+    st.dataframe(pd.DataFrame(display_rows), width="stretch")
+
+    instrument_rows = _build_instrument_rankings(ranked)
+    if instrument_rows:
+        st.markdown("**按交易标的聚合后的方向排名**")
+        st.dataframe(pd.DataFrame(instrument_rows), width="stretch")
+
+    if pending:
+        st.markdown("**正在确认，不要急着下单**")
+        for region_id, signal in pending[:5]:
+            st.write(
+                f"- {region_id}: 当前 `{signal.get('trading_action')}`，原始方向 `{signal.get('raw_trading_action')}`，"
+                f"{signal.get('signal')}"
+            )
+
+    if blocked:
+        st.markdown("**系统级别暂不交易**")
+        for region_id, signal in blocked[:5]:
+            st.write(f"- {region_id}: {signal.get('signal')} | {signal.get('confidence')} | action={signal.get('trading_action')}")
+
+
 def main():
     import streamlit as st
 
@@ -349,7 +651,7 @@ def main():
 
     output_base = st.sidebar.text_input("Outputs Directory", "outputs")
     api_base = st.sidebar.text_input("Backend API", "http://127.0.0.1:8000")
-    use_backend = st.sidebar.checkbox("Use backend service", value=True)
+    use_backend = st.sidebar.checkbox("Use backend service", value=False)
     regions = list_regions()
     region_options = {region["name"]: region["id"] for region in regions}
     selected_region_name = st.sidebar.selectbox("Region", options=list(region_options.keys()))
@@ -400,8 +702,11 @@ def main():
     trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
     region_instruments = list_region_instruments(selected_region)
     trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
+    summary_day = _resolve_summary_day(output_base, selected_day)
+    daily_summary = _load_daily_summary(output_base, selected_day)
 
-    _render_summary_header(st, selected_day, trade_signal, metrics_row)
+    _render_ranked_today_board(st, selected_day, daily_summary, output_base)
+    _render_summary_header(st, selected_day, trade_signal, metrics_row, summary_day=summary_day)
     _render_trade_ticket(st, trade_ticket)
     _render_how_to_use(st)
 
@@ -421,19 +726,19 @@ def main():
 
     with tab_brief:
         st.markdown("**每日中文简报**")
-        brief_text = _load_daily_brief(output_base, selected_day)
+        brief_text = _load_daily_brief(output_base, summary_day)
         if brief_text:
             st.markdown(brief_text)
             st.download_button(
                 "Download Chinese Brief",
                 brief_text.encode("utf-8"),
-                file_name=f"{selected_day}_daily_brief_zh.md",
+                file_name=f"{summary_day}_daily_brief_zh.md",
                 mime="text/markdown",
             )
         else:
             st.info("这个日期还没有生成中文简报。先运行 `scripts/china_daily_brief.py` 或 Railway 日任务。")
 
-        dashboard_path = Path(output_base) / selected_day / "signals_dashboard.html"
+        dashboard_path = Path(output_base) / summary_day / "signals_dashboard.html"
         if dashboard_path.exists():
             st.markdown("**Dashboard 文件**")
             st.code(str(dashboard_path))
@@ -568,24 +873,25 @@ def main():
         else:
             summary_df = pd.DataFrame(summaries)
             st.markdown("**Latest Backtest Summaries**")
-            st.dataframe(
-                summary_df[
-                    [
-                        "symbol",
-                        "strategy_name",
-                        "total_return",
-                        "sharpe",
-                        "max_drawdown",
-                        "win_rate",
-                        "profit_factor",
-                        "trade_count",
-                    ]
-                ],
-                width="stretch",
-            )
+            summary_columns = [
+                column
+                for column in [
+                    "symbol",
+                    "strategy_name",
+                    "total_return",
+                    "sharpe",
+                    "max_drawdown",
+                    "win_rate",
+                    "profit_factor",
+                    "trade_count",
+                ]
+                if column in summary_df.columns
+            ]
+            st.dataframe(summary_df[summary_columns] if summary_columns else summary_df, width="stretch")
             selected_summary = summaries[0]
-            equity_path = Path(selected_summary["equity_path"])
-            if equity_path.exists():
+            equity_path_value = selected_summary.get("equity_path")
+            if equity_path_value and Path(equity_path_value).exists():
+                equity_path = Path(equity_path_value)
                 equity_df = pd.read_parquet(equity_path)
                 if "date" in equity_df.columns:
                     equity_df["date"] = pd.to_datetime(equity_df["date"])
@@ -593,6 +899,8 @@ def main():
                     st.line_chart(equity_df.set_index("date")[["equity_curve"]], width="stretch")
                     st.markdown("**Drawdown**")
                     st.line_chart(equity_df.set_index("date")[["drawdown"]], width="stretch")
+            else:
+                st.caption("This backtest summary does not include an equity curve artifact.")
 
     with tab_signal:
         if len(calibration_df) == 0:

@@ -1,0 +1,83 @@
+{
+  "type": "FeatureCollection",
+  "name": "Detroit Auto Dealer Inventory Lots",
+  "description": "Major auto dealer lots in Detroit area for inventory monitoring",
+  "properties": {
+    "type": "auto_inventory",
+    "signal_logic": "Rising inventory = oversupply (bearish), Falling = strong demand (bullish)"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Ford Dearborn Lots",
+        "manufacturer": "Ford",
+        "ticker": "F"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-83.25, 42.32],
+          [-83.15, 42.32],
+          [-83.15, 42.26],
+          [-83.25, 42.26],
+          [-83.25, 42.32]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "GM Detroit-Hamtramck",
+        "manufacturer": "GM",
+        "ticker": "GM"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-83.05, 42.40],
+          [-82.98, 42.40],
+          [-82.98, 42.35],
+          [-83.05, 42.35],
+          [-83.05, 42.40]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Detroit Metro Dealer Lots",
+        "manufacturer": "Various",
+        "ticker": "CARZ"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-83.45, 42.35],
+          [-83.30, 42.35],
+          [-83.30, 42.25],
+          [-83.45, 42.25],
+          [-83.45, 42.35]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Stellantis Sterling Heights",
+        "manufacturer": "Stellantis",
+        "ticker": "STLA"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-83.05, 42.60],
+          [-82.95, 42.60],
+          [-82.95, 42.52],
+          [-83.05, 42.52],
+          [-83.05, 42.60]
+        ]]
+      }
+    }
+  ]
+}

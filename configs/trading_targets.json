@@ -1,0 +1,180 @@
+{
+  "chokepoints": {
+    "hormuz": {
+      "name": "Strait of Hormuz",
+      "type": "chokepoint",
+      "location": {"lat": 26.5, "lon": 56.5},
+      "aoi_file": "configs/aoi_hormuz.geojson",
+      "gate_file": "configs/gate_hormuz.geojson",
+      "daily_volume_barrels": 17000000,
+      "significance": "20% of world oil consumption",
+      "instruments": [
+        {"ticker": "WTI", "type": "futures", "exchange": "NYMEX"},
+        {"ticker": "Brent", "type": "futures", "exchange": "ICE"},
+        {"ticker": "XLE", "type": "etf", "exchange": "NYSE"},
+        {"ticker": "USO", "type": "etf", "exchange": "NYSE"}
+      ],
+      "signal_logic": {
+        "long_disruption": "SHORT oil - expect supply crunch",
+        "short_disruption": "CLOSE short - flow normalized"
+      },
+      "active": true
+    },
+    "suez": {
+      "name": "Suez Canal",
+      "type": "chokepoint",
+      "location": {"lat": 30.5, "lon": 32.5},
+      "aoi_file": "configs/aoi_suez.geojson",
+      "daily_volume_barrels": 5500000,
+      "significance": "Key route for Europe/Asia trade",
+      "instruments": [
+        {"ticker": "Brent", "type": "futures", "exchange": "ICE"},
+        {"ticker": "Natural Gas", "type": "futures", "exchange": "NYMEX"}
+      ],
+      "active": false
+    },
+    "malacca": {
+      "name": "Strait of Malacca",
+      "type": "chokepoint",
+      "location": {"lat": 2.0, "lon": 102.0},
+      "daily_volume_barrels": 15000000,
+      "significance": "Main Asia-Pacific oil route",
+      "instruments": [
+        {"ticker": "Brent", "type": "futures", "exchange": "ICE"},
+        {"ticker": "China oil stocks", "type": "equity", "exchange": "HKEX"}
+      ],
+      "active": false
+    }
+  },
+  
+  "retail": {
+    "walmart_hq": {
+      "name": "Walmart HQ - Bentonville, AR",
+      "type": "retail_parking",
+      "location": {"lat": 36.3729, "lon": -94.2087},
+      "instruments": [
+        {"ticker": "WMT", "type": "equity", "exchange": "NYSE"}
+      ],
+      "signal_logic": {
+        "traffic_above_baseline": "LONG - strong sales expected",
+        "traffic_below_baseline": "SHORT - weak sales expected"
+      },
+      "active": false,
+      "notes": "Monitor HQ and distribution center parking"
+    },
+    "costco_issaquah": {
+      "name": "Costco HQ - Issaquah, WA",
+      "type": "retail_parking",
+      "location": {"lat": 47.5348, "lon": -122.0346},
+      "instruments": [
+        {"ticker": "COST", "type": "equity", "exchange": "NASDAQ"}
+      ],
+      "active": false
+    },
+    "target_brooklyn": {
+      "name": "Target NYC Distribution",
+      "type": "retail_parking",
+      "location": {"lat": 40.6782, "lon": -73.9442},
+      "instruments": [
+        {"ticker": "TGT", "type": "equity", "exchange": "NYSE"}
+      ],
+      "active": false
+    }
+  },
+  
+  "auto": {
+    "detroit_lots": {
+      "name": "Detroit Auto Dealer Lots",
+      "type": "auto_inventory",
+      "location": {"lat": 42.3314, "lon": -83.0458},
+      "instruments": [
+        {"ticker": "F", "type": "equity", "exchange": "NYSE"},
+        {"ticker": "GM", "type": "equity", "exchange": "NYSE"},
+        {"ticker": "CARZ", "type": "etf", "exchange": "NASDAQ"}
+      ],
+      "signal_logic": {
+        "inventory_rising": "SHORT auto - oversupply",
+        "inventory_falling": "LONG auto - strong demand"
+      },
+      "active": false
+    },
+    "bremerhaven": {
+      "name": "Bremerhaven Port (German auto exports)",
+      "type": "auto_inventory",
+      "location": {"lat": 53.5499, "lon": 8.5833},
+      "instruments": [
+        {"ticker": "VW", "type": "equity", "exchange": "XETRA"},
+        {"ticker": "BMW", "type": "equity", "exchange": "XETRA"}
+      ],
+      "active": false
+    }
+  },
+  
+  "agriculture": {
+    "iowa_corn": {
+      "name": "Iowa Corn Belt",
+      "type": "agricultural",
+      "location": {"lat": 42.0, "lon": -93.5},
+      "instruments": [
+        {"ticker": "Corn", "type": "futures", "exchange": "CBOT"},
+        {"ticker": "Soybeans", "type": "futures", "exchange": "CBOT"}
+      ],
+      "signal_logic": {
+        "ndvi_above_trend": "SHORT corn - bumper crop expected",
+        "ndvi_below_trend": "LONG corn - supply concerns"
+      },
+      "active": false,
+      "seasonal": "April-October"
+    },
+    "brazil_soy": {
+      "name": "Brazil Soybean Region",
+      "type": "agricultural",
+      "location": {"lat": -15.0, "lon": -55.0},
+      "instruments": [
+        {"ticker": "Soybeans", "type": "futures", "exchange": "CBOT"}
+      ],
+      "active": false,
+      "seasonal": "November-March"
+    }
+  },
+  
+  "ports": {
+    "shanghai": {
+      "name": "Port of Shanghai",
+      "type": "port_logistics",
+      "location": {"lat": 31.0, "lon": 121.5},
+      "instruments": [
+        {"ticker": "FDX", "type": "equity", "exchange": "NYSE"},
+        {"ticker": "UPS", "type": "equity", "exchange": "NYSE"}
+      ],
+      "active": false
+    },
+    "la_longbeach": {
+      "name": "LA/Long Beach Port",
+      "type": "port_logistics",
+      "location": {"lat": 33.75, "lon": -118.25},
+      "instruments": [
+        {"ticker": "XLI", "type": "etf", "exchange": "NYSE"}
+      ],
+      "active": false
+    }
+  },
+  
+  "oil_storage": {
+    "cushing": {
+      "name": "Cushing, OK Storage",
+      "type": "oil_storage",
+      "location": {"lat": 35.98, "lon": -96.77},
+      "instruments": [
+        {"ticker": "WTI", "type": "futures", "exchange": "NYMEX"},
+        {"ticker": "USO", "type": "etf", "exchange": "NYSE"}
+      ],
+      "signal_logic": {
+        "storage_rising": "BEARISH oil",
+        "storage_falling": "BULLISH oil"
+      },
+      "active": false,
+      "notes": "Compare with EIA weekly report"
+    }
+  }
+}

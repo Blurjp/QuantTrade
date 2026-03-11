@@ -1,0 +1,6 @@
+# QuantTrade Daily Pipeline
+# Runs every day at 6:00 AM EST
+0 6 * * * /Users/jianpinghuang/.openclaw/workspace/projects/QuantTrade/scripts/daily_run.sh
+
+# Optional: Run backfill on Sundays at 5:00 AM to catch any missed data
+0 5 * * 0 /Users/jianpinghuang/.openclaw/workspace/projects/QuantTrade/.venv/bin/python -m automation.backfill --days 7 --output outputs >> /Users/jianpinghuang/.openclaw/workspace/projects/QuantTrade/logs/backfill.log 2>&1

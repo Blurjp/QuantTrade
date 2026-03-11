@@ -1,0 +1,46 @@
+{
+  "type": "FeatureCollection",
+  "name": "Costco HQ - Issaquah, WA",
+  "description": "Costco corporate headquarters parking for traffic monitoring",
+  "properties": {
+    "company": "Costco Wholesale",
+    "ticker": "COST",
+    "type": "retail_parking"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Costco Corporate HQ",
+        "lot_type": "employee_parking"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-122.0400, 47.5380],
+          [-122.0300, 47.5380],
+          [-122.0300, 47.5320],
+          [-122.0400, 47.5320],
+          [-122.0400, 47.5380]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Costco Warehouse Issaquah",
+        "lot_type": "store_parking"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-122.0450, 47.5450],
+          [-122.0350, 47.5450],
+          [-122.0350, 47.5380],
+          [-122.0450, 47.5380],
+          [-122.0450, 47.5450]
+        ]]
+      }
+    }
+  ]
+}

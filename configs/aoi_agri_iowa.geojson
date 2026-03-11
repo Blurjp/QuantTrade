@@ -1,0 +1,67 @@
+{
+  "type": "FeatureCollection",
+  "name": "Iowa Corn Belt",
+  "description": "Primary US corn and soybean production region for crop health monitoring",
+  "properties": {
+    "crops": ["corn", "soybeans"],
+    "type": "agricultural",
+    "season": "April-October",
+    "signal_logic": "NDVI anomaly vs 5-year average indicates yield deviation"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Central Iowa Corn",
+        "primary_crop": "corn",
+        "county": "Story, Boone, Hamilton"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-93.8, 42.2],
+          [-93.2, 42.2],
+          [-93.2, 41.8],
+          [-93.8, 41.8],
+          [-93.8, 42.2]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Northwest Iowa",
+        "primary_crop": "corn",
+        "county": "Sioux, Lyon, Plymouth"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-96.5, 43.5],
+          [-95.5, 43.5],
+          [-95.5, 42.8],
+          [-96.5, 42.8],
+          [-96.5, 43.5]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Southwest Iowa Soybeans",
+        "primary_crop": "soybeans",
+        "county": "Cass, Adams, Montgomery"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-95.5, 41.5],
+          [-94.8, 41.5],
+          [-94.8, 40.8],
+          [-95.5, 40.8],
+          [-95.5, 41.5]
+        ]]
+      }
+    }
+  ]
+}

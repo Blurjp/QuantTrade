@@ -1,0 +1,242 @@
+"""
+Price feed integration for trading instruments.
+
+Fetches current prices from various sources:
+- Yahoo Finance (free, delayed)
+- Alpha Vantage (free tier available)
+- Polygon.io (crypto, stocks)
+"""
+
+from typing import Dict, Optional
+from datetime import datetime, date
+import json
+from pathlib import Path
+import time
+
+
+# Fallback prices (used when API unavailable)
+# Last updated: 2026-03-09 (from Yahoo Finance)
+DEFAULT_PRICES = {
+    # Commodities
+    "WTI": 86.0,
+    "Brent": 89.0,
+    "Natural Gas": 2.50,
+    "Corn": 4.50,
+    "Soybeans": 10.50,
+    "Wheat": 5.50,
+    
+    # Equities
+    "WMT": 124.0,
+    "COST": 1005.0,
+    "TGT": 120.0,
+    "HD": 360.0,
+    "F": 12.20,
+    "GM": 75.0,
+    "TM": 185.0,
+    "CAT": 340.0,
+    "DE": 420.0,
+    "FDX": 260.0,
+    "UPS": 155.0,
+    
+    # ETFs
+    "XLE": 85.0,
+    "XLI": 171.0,
+    "XRT": 80.0,
+    "CARZ": 28.0,
+    "USO": 75.0,
+}
+
+
+def fetch_price_yahoo(ticker: str) -> Optional[float]:
+    """
+    Fetch price from Yahoo Finance (free, may have rate limits).
+    
+    Uses yfinance library.
+    """
+    try:
+        import yfinance as yf
+        
+        # Map tickers to Yahoo format
+        yahoo_ticker = {
+            "WTI": "CL=F",  # WTI Crude Futures
+            "Brent": "BZ=F",  # Brent Crude Futures
+            "Natural Gas": "NG=F",
+            "Corn": "ZC=F",
+            "Soybeans": "ZS=F",
+            "Wheat": "ZW=F",
+        }.get(ticker, ticker)
+        
+        stock = yf.Ticker(yahoo_ticker)
+        hist = stock.history(period="1d")
+        
+        if not hist.empty:
+            return float(hist['Close'].iloc[-1])
+        
+        return None
+    
+    except Exception as e:
+        print(f"Error fetching {ticker} from Yahoo: {e}")
+        return None
+
+
+def fetch_price_alpha_vantage(ticker: str, api_key: str = None) -> Optional[float]:
+    """
+    Fetch price from Alpha Vantage (free tier available).
+    
+    Requires API key from alphavantage.co
+    """
+    import os
+    
+    if api_key is None:
+        api_key = os.environ.get("ALPHA_VANTAGE_API_KEY")
+    
+    if not api_key:
+        return None
+    
+    try:
+        import requests
+        
+        url = f"https://www.alphavantage.co/query"
+        params = {
+            "function": "GLOBAL_QUOTE",
+            "symbol": ticker,
+            "apikey": api_key,
+        }
+        
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        if "Global Quote" in data:
+            return float(data["Global Quote"]["05. price"])
+        
+        return None
+    
+    except Exception as e:
+        print(f"Error fetching {ticker} from Alpha Vantage: {e}")
+        return None
+
+
+def fetch_all_prices(
+    tickers: list = None,
+    use_cache: bool = True,
+    cache_ttl_seconds: int = 3600,
+) -> Dict[str, float]:
+    """
+    Fetch prices for all tracked instruments.
+    
+    Args:
+        tickers: List of tickers to fetch (default: all tracked)
+        use_cache: Use cached prices if available
+        cache_ttl_seconds: Cache time-to-live
+    
+    Returns:
+        Dictionary of ticker -> price
+    """
+    cache_file = Path("outputs/price_cache.json")
+    
+    # Check cache
+    if use_cache and cache_file.exists():
+        cache = json.loads(cache_file.read_text())
+        cached_time = datetime.fromisoformat(cache.get("timestamp", "2000-01-01"))
+        age = (datetime.now() - cached_time).total_seconds()
+        
+        if age < cache_ttl_seconds:
+            return cache.get("prices", DEFAULT_PRICES)
+    
+    if tickers is None:
+        tickers = list(DEFAULT_PRICES.keys())
+    
+    prices = {}
+    
+    for ticker in tickers:
+        # Try Yahoo first
+        price = fetch_price_yahoo(ticker)
+        
+        if price is None:
+            # Fall back to default
+            price = DEFAULT_PRICES.get(ticker)
+        
+        if price is not None:
+            prices[ticker] = price
+        else:
+            # Use default if all else fails
+            prices[ticker] = DEFAULT_PRICES.get(ticker, 0)
+        
+        # Rate limiting
+        time.sleep(0.1)
+    
+    # Save cache
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps({
+        "timestamp": datetime.now().isoformat(),
+        "prices": prices,
+    }, indent=2))
+    
+    return prices
+
+
+def get_price(ticker: str) -> float:
+    """
+    Get price for a single ticker.
+    
+    Tries Yahoo Finance first, falls back to defaults.
+    """
+    price = fetch_price_yahoo(ticker)
+    
+    if price is None:
+        price = DEFAULT_PRICES.get(ticker, 0)
+    
+    return price
+
+
+def get_prices_for_portfolio(portfolio) -> Dict[str, float]:
+    """
+    Get prices for all instruments in portfolio.
+    """
+    tickers = set()
+    
+    # Add tickers from open positions
+    for ticker in portfolio.positions.keys():
+        tickers.add(ticker)
+    
+    # Add tickers from all active regions
+    from pipeline.regions import load_registry
+    try:
+        registry = load_registry()
+        for region_config in registry.get("regions", {}).values():
+            if region_config.get("active"):
+                instruments = region_config.get("instruments", [])
+                for inst in instruments:
+                    if isinstance(inst, dict):
+                        tickers.add(inst.get("ticker"))
+                    else:
+                        tickers.add(inst)
+    except:
+        pass
+    
+    return fetch_all_prices(list(tickers))
+
+
+if __name__ == "__main__":
+    print("Fetching prices for tracked instruments...")
+    print()
+    
+    prices = fetch_all_prices(use_cache=False)
+    
+    print("Current Prices:")
+    print("-" * 40)
+    
+    categories = {
+        "Commodities": ["WTI", "Brent", "Natural Gas", "Corn", "Soybeans", "Wheat"],
+        "Retail": ["WMT", "COST", "TGT", "HD"],
+        "Auto": ["F", "GM", "TM"],
+        "Industrial": ["CAT", "DE"],
+        "Logistics": ["FDX", "UPS"],
+        "ETFs": ["XLE", "XLI", "XRT", "CARZ", "USO"],
+    }
+    
+    for category, tickers in categories.items():
+        print(f"\n{category}:")
+        for ticker in tickers:
+            price = prices.get(ticker, 0)
+            print(f"  {ticker:>12}: ${price:,.2f}")

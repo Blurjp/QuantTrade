@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Cushing Oil Storage Hub",
+        "type": "oil_storage",
+        "description": "Strategic petroleum reserve and commercial storage"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-97.0, 35.9],
+          [-97.0, 36.1],
+          [-96.7, 36.1],
+          [-96.7, 35.9],
+          [-97.0, 35.9]
+        ]]
+      }
+    }
+  ]
+}

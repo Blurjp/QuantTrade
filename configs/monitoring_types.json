@@ -1,0 +1,103 @@
+{
+  "monitoring_types": {
+    "chokepoint": {
+      "description": "Strategic shipping chokepoints for oil/gas",
+      "examples": ["Hormuz", "Malacca", "Suez", "Panama", "Bab el-Mandeb"],
+      "data_source": "Sentinel-1 SAR",
+      "detection_target": "ships",
+      "trading_instruments": ["WTI", "Brent", "Natural Gas", "Tanker Stocks"],
+      "signal_logic": "throughput_anomaly",
+      "update_frequency": "daily"
+    },
+    
+    "retail_parking": {
+      "description": "Retail store parking lot traffic",
+      "examples": ["Walmart", "Costco", "Target", "Home Depot"],
+      "data_source": "Sentinel-2 / Maxar",
+      "detection_target": "vehicles",
+      "trading_instruments": ["WMT", "COST", "TGT", "HD", "XRT ETF"],
+      "signal_logic": "traffic_vs_baseline",
+      "update_frequency": "weekly",
+      "latency": "2-3 days"
+    },
+    
+    "agricultural": {
+      "description": "Crop health and harvest progress",
+      "examples": ["US Corn Belt", "Brazil Soybeans", "Ukraine Wheat"],
+      "data_source": "Sentinel-2 / Landsat",
+      "detection_target": "NDVI / crop_color",
+      "trading_instruments": ["Corn", "Soybeans", "Wheat", "Coffee", "Sugar"],
+      "signal_logic": "yield_estimate_vs_forecast",
+      "update_frequency": "weekly",
+      "seasonality": true
+    },
+    
+    "port_logistics": {
+      "description": "Container port activity",
+      "examples": ["Shanghai", "LA/Long Beach", "Rotterdam", "Singapore"],
+      "data_source": "Sentinel-1 / Planet",
+      "detection_target": "containers / cranes / ships",
+      "trading_instruments": ["Shipping ETFs", "Maersk", "FedEx", "UPS"],
+      "signal_logic": "throughput_trend",
+      "update_frequency": "daily"
+    },
+    
+    "auto_inventory": {
+      "description": "Car dealer/manufacturer inventory lots",
+      "examples": ["Detroit lots", "German ports", "Japan export yards"],
+      "data_source": "Sentinel-2 / Maxar",
+      "detection_target": "parked_vehicles",
+      "trading_instruments": ["F", "GM", "TM", "VW", "CARZ ETF"],
+      "signal_logic": "inventory_level_change",
+      "update_frequency": "weekly"
+    },
+    
+    "oil_storage": {
+      "description": "Oil storage tank levels (floating roofs)",
+      "examples": ["Cushing", "Rotterdam", "Singapore"],
+      "data_source": "Sentinel-1 / Landsat",
+      "detection_target": "tank_roof_height",
+      "trading_instruments": ["WTI", "Brent", "Crack Spread"],
+      "signal_logic": "inventory_vs_EIA",
+      "update_frequency": "weekly"
+    },
+    
+    "construction": {
+      "description": "Construction site progress",
+      "examples": ["Data centers", "Factories", "Housing developments"],
+      "data_source": "Sentinel-2 / Maxar",
+      "detection_target": "buildings / equipment",
+      "trading_instruments": ["CAT", "DE", "Home builders ETF"],
+      "signal_logic": "activity_level_change",
+      "update_frequency": "monthly"
+    },
+    
+    "coal_power": {
+      "description": "Coal stockpiles at power plants",
+      "examples": ["China plants", "India plants", "US plants"],
+      "data_source": "Sentinel-2 / Planet",
+      "detection_target": "coal_pile_size",
+      "trading_instruments": ["Coal futures", "Mining stocks", "Utilities"],
+      "signal_logic": "inventory_trend",
+      "update_frequency": "weekly"
+    }
+  },
+  
+  "priority_ranking": [
+    {"type": "chokepoint", "priority": 1, "active": true, "regions": ["hormuz"]},
+    {"type": "retail_parking", "priority": 2, "active": false, "regions": []},
+    {"type": "agricultural", "priority": 3, "active": false, "regions": []},
+    {"type": "port_logistics", "priority": 2, "active": false, "regions": []},
+    {"type": "auto_inventory", "priority": 3, "active": false, "regions": []},
+    {"type": "oil_storage", "priority": 2, "active": false, "regions": []},
+    {"type": "construction", "priority": 4, "active": false, "regions": []},
+    {"type": "coal_power", "priority": 3, "active": false, "regions": []}
+  ],
+  
+  "notes": {
+    "data_access": "Sentinel-1/2 are free via Planetary Computer. Maxar/Planet require paid subscription.",
+    "latency": "Free data has 1-3 day latency. Paid data can be same-day.",
+    "edge": "Satellite data beats official reports by days to weeks.",
+    "risks": ["Cloud cover (optical)", "Revisit frequency", "Detection accuracy"]
+  }
+}

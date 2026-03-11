@@ -1,0 +1,164 @@
+{
+  "version": "2.0",
+  "updated": "2026-03-10",
+  "regions": {
+    "hormuz": {
+      "name": "Strait of Hormuz",
+      "type": "chokepoint",
+      "aoi_file": "configs/aoi_hormuz.geojson",
+      "gate_file": "configs/gate_hormuz.geojson",
+      "active": true,
+      "instruments": [
+        "WTI",
+        "Brent",
+        "XLE"
+      ],
+      "description": "Key oil shipping chokepoint, 20% of world consumption"
+    },
+    "suez": {
+      "name": "Suez Canal",
+      "type": "chokepoint",
+      "aoi_file": "configs/regions/suez/aoi.geojson",
+      "active": false,
+      "instruments": [
+        "Brent",
+        "Natural Gas"
+      ],
+      "description": "Europe-Asia trade route"
+    },
+    "malacca": {
+      "name": "Strait of Malacca",
+      "type": "chokepoint",
+      "aoi_file": "configs/regions/malacca/aoi.geojson",
+      "active": false,
+      "instruments": [
+        "Brent"
+      ],
+      "description": "Asia-Pacific oil route"
+    },
+    "walmart_hq": {
+      "name": "Walmart HQ Parking",
+      "type": "retail_parking",
+      "aoi_file": "configs/aoi_retail_walmart.geojson",
+      "active": true,
+      "instruments": [
+        "WMT"
+      ],
+      "description": "Walmart employee traffic indicator"
+    },
+    "costco_hq": {
+      "name": "Costco HQ Parking",
+      "type": "retail_parking",
+      "aoi_file": "configs/aoi_retail_costco.geojson",
+      "active": true,
+      "instruments": [
+        "COST"
+      ],
+      "description": "Costco traffic indicator"
+    },
+    "cushing": {
+      "name": "Cushing Oil Storage Hub",
+      "type": "oil_storage",
+      "description": "Strategic petroleum reserve and commercial storage",
+      "center": [
+        -96.8694,
+        35.9851
+      ],
+      "radius_km": 15,
+      "country": "USA",
+      "state": "Oklahoma",
+      "signal_asset": "WTI",
+      "detection_method": "tank_shadow",
+      "collection": "sentinel-2-l2a",
+      "minio_bucket": "sentinel-2-l2a",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/cushing.json"
+    },
+    "iowa_corn": {
+      "name": "Iowa Corn Belt",
+      "type": "agricultural",
+      "aoi_file": "configs/aoi_agri_iowa.geojson",
+      "active": true,
+      "instruments": [
+        "Corn",
+        "Soybeans"
+      ],
+      "description": "Primary US corn/soy production",
+      "seasonal": "April-October"
+    },
+    "detroit_auto": {
+      "name": "Detroit Auto Inventory",
+      "type": "auto_inventory",
+      "aoi_file": "configs/aoi_auto_detroit.geojson",
+      "active": true,
+      "instruments": [
+        "F",
+        "GM",
+        "CARZ"
+      ],
+      "description": "Auto dealer inventory lots"
+    },
+    "la_longbeach": {
+      "name": "LA/Long Beach Port",
+      "type": "port_logistics",
+      "aoi_file": "configs/aoi_port_lalongbeach.geojson",
+      "active": true,
+      "instruments": [
+        "XLI",
+        "FDX",
+        "UPS"
+      ],
+      "description": "Largest US container port, 40% of imports"
+    },
+    "brazil_soy": {
+      "name": "Brazil Soybean Regions",
+      "type": "agriculture",
+      "description": "Mato Grosso soybean production",
+      "center": [
+        -55.0,
+        -13.0
+      ],
+      "radius_km": 200,
+      "country": "Brazil",
+      "signal_asset": "Soybeans",
+      "detection_method": "ndvi",
+      "collection": "sentinel-2-l2a",
+      "season": "Oct-Apr",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/brazil_soy.json"
+    },
+    "panama_canal": {
+      "name": "Panama Canal",
+      "type": "chokepoint",
+      "description": "Key shipping route",
+      "center": [
+        -79.9,
+        9.1
+      ],
+      "radius_km": 20,
+      "country": "Panama",
+      "signal_asset": "BDI",
+      "detection_method": "ship_count",
+      "collection": "sentinel-1-rtc",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/panama_canal.json"
+    }
+  },
+  "active_count": 11,
+  "total_count": 9,
+  "notes": {
+    "detection_status": {
+      "chokepoint": "\u2705 Production",
+      "retail_parking": "\ud83d\udd27 Needs vehicle detection model",
+      "oil_storage": "\ud83d\udd27 Needs tank level algorithm",
+      "agricultural": "\ud83d\udd27 Needs NDVI pipeline",
+      "auto_inventory": "\ud83d\udd27 Needs vehicle detection model",
+      "port_logistics": "\ud83d\udd27 Needs container detection"
+    },
+    "data_requirements": {
+      "retail_parking": "Cloud-free optical or commercial imagery",
+      "oil_storage": "SAR or high-res optical",
+      "agricultural": "Sentinel-2 weekly"
+    }
+  }
+}

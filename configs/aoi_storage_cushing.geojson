@@ -1,0 +1,64 @@
+{
+  "type": "FeatureCollection",
+  "name": "Cushing Oil Storage Hub",
+  "description": "Major oil storage tanks - monitor floating roof heights for inventory levels",
+  "properties": {
+    "location": "Cushing, Oklahoma",
+    "type": "oil_storage",
+    "significance": "NYMEX WTI delivery point, ~90M barrels capacity",
+    "signal_logic": "Compare tank levels vs EIA weekly report"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Cushing Tank Farm North",
+        "operator": "Multiple"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-96.80, 36.02],
+          [-96.75, 36.02],
+          [-96.75, 35.98],
+          [-96.80, 35.98],
+          [-96.80, 36.02]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Cushing Tank Farm South",
+        "operator": "Multiple"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-96.80, 35.98],
+          [-96.75, 35.98],
+          [-96.75, 35.94],
+          [-96.80, 35.94],
+          [-96.80, 35.98]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Cushing Tank Farm East",
+        "operator": "Multiple"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-96.75, 36.00],
+          [-96.70, 36.00],
+          [-96.70, 35.96],
+          [-96.75, 35.96],
+          [-96.75, 36.00]
+        ]]
+      }
+    }
+  ]
+}

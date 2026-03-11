@@ -1,0 +1,47 @@
+{
+  "type": "FeatureCollection",
+  "name": "Walmart HQ - Bentonville, AR",
+  "description": "Walmart Home Office parking lots for traffic monitoring",
+  "properties": {
+    "company": "Walmart Inc.",
+    "ticker": "WMT",
+    "type": "retail_parking",
+    "signal_logic": "Compare parking lot vehicle count vs historical baseline"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Walmart Home Office Main",
+        "lot_type": "employee_parking"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-94.2150, 36.3770],
+          [-94.2050, 36.3770],
+          [-94.2050, 36.3700],
+          [-94.2150, 36.3700],
+          [-94.2150, 36.3770]
+        ]]
+      }
+    },
+    {
+      "type": "Feature", 
+      "properties": {
+        "name": "Walmart Distribution Center",
+        "lot_type": "distribution"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-94.2250, 36.3850],
+          [-94.2100, 36.3850],
+          [-94.2100, 36.3750],
+          [-94.2250, 36.3750],
+          [-94.2250, 36.3850]
+        ]]
+      }
+    }
+  ]
+}

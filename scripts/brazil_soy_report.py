@@ -56,6 +56,10 @@ def compute_meta_backtest(backtests):
     return {"stance": stance, "vote_score": vote_score}
 
 
+def load_meta_backtest(backtest_dir: Path, meta_group: str):
+    return load_json(backtest_dir / f"{meta_group}_meta_Soybeans_backtest.json")
+
+
 def load_json(path: Path):
     if not path.exists():
         return None
@@ -132,7 +136,25 @@ def main() -> int:
         print("No Brazil soy backtests found")
 
     meta_signal = daily_summary.get("signals", {}).get("brazil_soy_meta") if daily_summary else None
-    meta_backtest = compute_meta_backtest(backtests)
+    meta_backtest_file = load_meta_backtest(backtest_dir, "brazil_soy")
+    meta_backtest = None
+    if meta_backtest_file:
+        stats = meta_backtest_file.get("backtest", {})
+        directions = stats.get("by_direction", {})
+        long_acc = directions.get("long", {}).get("accuracy", 0.0)
+        short_acc = directions.get("short", {}).get("accuracy", 0.0)
+        if long_acc > short_acc:
+            stance = "LONG"
+        elif short_acc > long_acc:
+            stance = "SHORT"
+        else:
+            stance = "FLAT"
+        meta_backtest = {
+            "stance": stance,
+            "vote_score": stats.get("overall_accuracy", 0.0),
+        }
+    else:
+        meta_backtest = compute_meta_backtest(backtests)
     if meta_signal or meta_backtest:
         print()
         print("Brazil Soy Meta")

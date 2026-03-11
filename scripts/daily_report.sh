@@ -39,3 +39,6 @@ python scripts/brazil_soy_report.py --date "$DATE" --output outputs 2>&1 || true
 
 echo
 python scripts/active_signals_report.py --date "$DATE" --output outputs 2>&1 || true
+
+echo
+python scripts/signals_dashboard.py --date "$DATE" --output outputs 2>&1 || true

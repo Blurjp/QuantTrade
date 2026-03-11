@@ -15,6 +15,13 @@ import pandas as pd
 import numpy as np
 
 
+def load_registry(output_base: str = "outputs") -> Dict:
+    registry_path = Path("configs/regions/registry_v2.json")
+    if not registry_path.exists():
+        registry_path = Path("configs/regions/registry.json")
+    return json.loads(registry_path.read_text())
+
+
 def _seasonal_series_baseline(
     df: pd.DataFrame,
     value_column: str,
@@ -107,7 +114,7 @@ def fetch_historical_prices(
     ticker: str,
     start_date: str,
     end_date: str,
-) -> pd.DataFrame:
+) -> Optional[pd.DataFrame]:
     """
     Fetch historical prices from Yahoo Finance.
     
@@ -170,7 +177,7 @@ def generate_historical_signals(
     detection_data: Dict,
     signal_type: str = "chokepoint",
     threshold: Optional[float] = None,
-) -> pd.DataFrame:
+) -> Optional[pd.DataFrame]:
     """
     Generate signals from historical detection data.
     
@@ -194,6 +201,81 @@ def generate_historical_signals(
     df = df.sort_values('date')
     
     return _generate_signal_direction(df, signal_type, threshold)
+
+
+def generate_meta_historical_signals(
+    meta_group: str,
+    output_base: str = "outputs",
+    threshold: float = 0.2,
+) -> Optional[pd.DataFrame]:
+    registry = load_registry(output_base)
+    meta_groups = registry.get("meta_groups", {})
+    if meta_group not in meta_groups:
+        return None
+
+    members = []
+    for region_id, config in registry.get("regions", {}).items():
+        if config.get("meta_group") == meta_group:
+            members.append((region_id, float(config.get("meta_weight", 1.0)), config))
+
+    if not members:
+        return None
+
+    timeline = None
+    member_votes = []
+    for region_id, weight, config in members:
+        detection_data = load_backfill_data(region_id, output_base)
+        if not detection_data:
+            continue
+        signals = generate_historical_signals(detection_data, config.get("type", "chokepoint"))
+        if signals is None or signals.empty:
+            continue
+
+        series = signals[["date", "signal_direction"]].copy().sort_values("date")
+        vote_map = {
+            "long": 1.0,
+            "long_disruption": 1.0,
+            "short": -1.0,
+            "short_disruption": -1.0,
+            "neutral": 0.0,
+        }
+        series[region_id] = series["signal_direction"].apply(lambda value: vote_map.get(value, 0.0))
+        series = series[["date", region_id]]
+
+        if timeline is None:
+            timeline = series[["date"]].copy()
+        else:
+            timeline = pd.concat([timeline, series[["date"]]], ignore_index=True)
+            timeline = timeline.drop_duplicates(subset=["date"]).sort_values(by="date")
+
+        member_votes.append((region_id, weight, series))
+
+    if timeline is None or not member_votes:
+        return None
+
+    meta_df = timeline.sort_values(by="date").reset_index(drop=True)
+    total_weight = 0.0
+    for region_id, weight, series in member_votes:
+        total_weight += weight
+        meta_df = pd.merge_asof(
+            meta_df,
+            series.sort_values("date"),
+            on="date",
+            direction="backward",
+        )
+        meta_df[region_id] = meta_df[region_id].fillna(0.0)
+
+    weighted_parts = [meta_df[region_id] * weight for region_id, weight, _ in member_votes]
+    weighted_sum = weighted_parts[0]
+    for part in weighted_parts[1:]:
+        weighted_sum = weighted_sum + part
+    meta_df["signal_raw"] = weighted_sum / total_weight if total_weight else 0.0
+    meta_df["signal_direction"] = np.where(
+        meta_df["signal_raw"] >= threshold,
+        "long",
+        np.where(meta_df["signal_raw"] <= -threshold, "short", "neutral"),
+    )
+    return meta_df[["date", "signal_raw", "signal_direction"]]
 
 
 def backtest_signals(
@@ -384,6 +466,51 @@ def run_full_backtest(
     return results
 
 
+def run_meta_backtest(
+    meta_group: str,
+    ticker: str,
+    output_base: str = "outputs",
+    forward_days: int = 5,
+) -> Dict:
+    print(f"\n{'='*60}")
+    print(f"Backtesting meta group: {meta_group} → {ticker}")
+    print(f"{'='*60}")
+
+    signals = generate_meta_historical_signals(meta_group, output_base=output_base)
+    if signals is None or signals.empty:
+        return {"status": "error", "message": "No meta signals"}
+
+    dates = signals["date"].dt.strftime("%Y-%m-%d").tolist()
+    start_date = min(dates)
+    end_date = max(dates)
+    end_date_buffered = (datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=forward_days + 10)).strftime("%Y-%m-%d")
+
+    print(f"  Fetching {ticker} prices ({start_date} to {end_date_buffered})...")
+    prices = fetch_historical_prices(ticker, start_date, end_date_buffered)
+    if prices is None or prices.empty:
+        return {"status": "error", "message": "No price data"}
+
+    prices = calculate_price_returns(prices, forward_days)
+    backtest_results = backtest_signals(signals.copy(), prices, forward_days)
+
+    results = {
+        "region": f"{meta_group}_meta",
+        "ticker": ticker,
+        "signal_type": "meta_signal",
+        "start_date": start_date,
+        "end_date": end_date,
+        "forward_days": forward_days,
+        "backtest": backtest_results,
+    }
+
+    output_path = Path(output_base) / "backtest"
+    output_path.mkdir(parents=True, exist_ok=True)
+    result_file = output_path / f"{meta_group}_meta_{ticker}_backtest.json"
+    result_file.write_text(json.dumps(results, indent=2, default=str))
+    print(f"  ✓ Saved to {result_file}")
+    return results
+
+
 def optimize_thresholds(
     region_id: str,
     ticker: str,
@@ -458,11 +585,17 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Signal backtesting")
-    parser.add_argument("--region", required=True, help="Region ID")
+    parser.add_argument("--region", help="Region ID")
+    parser.add_argument("--meta-group", help="Meta group ID")
     parser.add_argument("--ticker", required=True, help="Trading ticker")
     parser.add_argument("--forward", type=int, default=5, help="Forward days")
     parser.add_argument("--output", default="outputs", help="Output directory")
     
     args = parser.parse_args()
     
-    run_full_backtest(args.region, args.ticker, args.output, args.forward)
+    if args.meta_group:
+        run_meta_backtest(args.meta_group, args.ticker, args.output, args.forward)
+    elif args.region:
+        run_full_backtest(args.region, args.ticker, args.output, args.forward)
+    else:
+        raise SystemExit("Must provide --region or --meta-group")

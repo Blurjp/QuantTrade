@@ -22,7 +22,7 @@ CONFIDENCE_WEIGHTS = {
     "Medium": 0.6,
     "Low": 0.25,
 }
-META_CONFIRMATIONS = 2
+DEFAULT_CONFIRMATIONS = 1
 
 
 def _meta_signal_text(group_config: Dict, direction: str) -> str:
@@ -45,19 +45,19 @@ def _meta_bias(group_config: Dict, direction: str) -> str:
     return neutral
 
 
-def _meta_state_file(output_base: str) -> Path:
-    return Path(output_base) / "meta_signals_state.json"
+def _persistence_state_file(output_base: str) -> Path:
+    return Path(output_base) / "signal_persistence_state.json"
 
 
-def load_meta_state(output_base: str) -> Dict:
-    state_file = _meta_state_file(output_base)
+def load_persistence_state(output_base: str) -> Dict:
+    state_file = _persistence_state_file(output_base)
     if not state_file.exists():
         return {}
     return json.loads(state_file.read_text())
 
 
-def save_meta_state(output_base: str, state: Dict) -> None:
-    state_file = _meta_state_file(output_base)
+def save_persistence_state(output_base: str, state: Dict) -> None:
+    state_file = _persistence_state_file(output_base)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2))
 
@@ -69,7 +69,7 @@ def _signal_vote(signal: Dict) -> float:
     return direction * confidence
 
 
-def apply_meta_signal_persistence(raw_signal: Dict, previous_state: Dict, confirmations_required: int = META_CONFIRMATIONS) -> tuple[Dict, Dict]:
+def apply_signal_persistence(raw_signal: Dict, previous_state: Dict, confirmations_required: int = DEFAULT_CONFIRMATIONS) -> tuple[Dict, Dict]:
     raw_action = raw_signal.get("trading_action", "FLAT")
     live_action = previous_state.get("live_action", "FLAT")
     pending_action = previous_state.get("pending_action", raw_action)
@@ -93,7 +93,7 @@ def apply_meta_signal_persistence(raw_signal: Dict, previous_state: Dict, confir
 
     persisted = dict(raw_signal)
     if applied_action != raw_action:
-        persisted["signal"] = persisted.get("signal", "Meta signal") + " (pending confirmation)"
+        persisted["signal"] = persisted.get("signal", "Signal") + " (pending confirmation)"
         persisted["actionability"] = "Ignore" if applied_action == "FLAT" else persisted.get("actionability", "Ignore")
         persisted["confidence"] = "Low"
     persisted["raw_trading_action"] = raw_action
@@ -110,7 +110,7 @@ def apply_meta_signal_persistence(raw_signal: Dict, previous_state: Dict, confir
     return persisted, next_state
 
 
-def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, output_base: str) -> Dict:
+def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, persistence_state: Dict) -> tuple[Dict, Dict]:
     grouped_regions = {}
     for region_id, config in region_configs.items():
         group = config.get("meta_group")
@@ -119,7 +119,6 @@ def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, o
         grouped_regions.setdefault(group, []).append((region_id, config))
 
     meta_signals = {}
-    meta_state = load_meta_state(output_base)
     next_meta_state = {}
     for group, members in grouped_regions.items():
         group_config = meta_groups.get(group, {})
@@ -178,17 +177,15 @@ def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, o
             "constituents": constituents,
             "portfolio_trade": group_config.get("portfolio_trade", True),
         }
-        persisted_signal, persisted_state = apply_meta_signal_persistence(
+        persisted_signal, persisted_state = apply_signal_persistence(
             raw_signal,
-            meta_state.get(group, {}),
-            confirmations_required=int(group_config.get("confirmations_required", META_CONFIRMATIONS)),
+            persistence_state.get(f"meta:{group}", {}),
+            confirmations_required=int(group_config.get("confirmations_required", DEFAULT_CONFIRMATIONS)),
         )
         meta_signals[f"{group}_meta"] = persisted_signal
-        next_meta_state[group] = persisted_state
+        next_meta_state[f"meta:{group}"] = persisted_state
 
-    save_meta_state(output_base, next_meta_state)
-
-    return meta_signals
+    return meta_signals, next_meta_state
 
 
 def _extract_signal_frame(region_type: str, detection: dict, region_id: str, output_base: str) -> pd.DataFrame:
@@ -313,6 +310,11 @@ def run_daily_pipeline(
     registry = load_registry()
     active_regions = get_active_regions()
     meta_groups = registry.get("meta_groups", {})
+    persistence_state = load_persistence_state(output_base)
+    next_persistence_state = {
+        key: value for key, value in persistence_state.items()
+        if key.startswith("meta:")
+    }
     
     if regions_filter:
         active_regions = {
@@ -358,13 +360,22 @@ def run_daily_pipeline(
                 generated_signal = generate_signal(region_config.get("type"), frame)
                 signal_payload.update(generated_signal)
 
-        signals[region_id] = signal_payload
-        
+        persisted_signal, persisted_state = apply_signal_persistence(
+            signal_payload,
+            persistence_state.get(f"region:{region_id}", {}),
+            confirmations_required=int(region_config.get("confirmations_required", DEFAULT_CONFIRMATIONS)),
+        )
+        signals[region_id] = persisted_signal
+        next_persistence_state[f"region:{region_id}"] = persisted_state
+
         status = "✅" if result["status"] == "success" else "❌"
         print(f"  Status: {status} {result['status']}")
     
     # Save summary
-    signals.update(build_meta_signals(signals, active_regions, meta_groups, output_base))
+    meta_signals, meta_state = build_meta_signals(signals, active_regions, meta_groups, persistence_state)
+    signals.update(meta_signals)
+    next_persistence_state.update(meta_state)
+    save_persistence_state(output_base, next_persistence_state)
 
     summary = {
         "date": target_date,

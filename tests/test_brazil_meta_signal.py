@@ -1,5 +1,5 @@
 from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
-from pipeline.run_daily import apply_meta_signal_persistence, build_meta_signals, update_portfolio_with_signals
+from pipeline.run_daily import apply_signal_persistence, build_meta_signals, update_portfolio_with_signals
 
 
 META_GROUPS = {
@@ -28,7 +28,7 @@ def test_build_meta_signals_respects_weights_and_votes(tmp_path):
         "brazil_soy_southeast": {"meta_group": "brazil_soy", "meta_weight": 0.25},
     }
 
-    meta_signals = build_meta_signals(signals, region_configs, META_GROUPS, str(tmp_path))
+    meta_signals, _ = build_meta_signals(signals, region_configs, META_GROUPS, {})
     meta = meta_signals["brazil_soy_meta"]
 
     assert meta["trading_action"] == "FLAT"
@@ -48,13 +48,14 @@ def test_build_meta_signals_can_turn_long_after_confirmation(tmp_path):
         "brazil_soy_southeast": {"meta_group": "brazil_soy", "meta_weight": 0.25},
     }
 
-    first_pass = build_meta_signals(signals, region_configs, META_GROUPS, str(tmp_path))
+    persistence_state = {}
+    first_pass, first_state = build_meta_signals(signals, region_configs, META_GROUPS, persistence_state)
     first_meta = first_pass["brazil_soy_meta"]
 
     assert first_meta["trading_action"] == "FLAT"
     assert first_meta["raw_trading_action"] == "LONG"
 
-    meta_signals = build_meta_signals(signals, region_configs, META_GROUPS, str(tmp_path))
+    meta_signals, _ = build_meta_signals(signals, region_configs, META_GROUPS, first_state)
     meta = meta_signals["brazil_soy_meta"]
 
     assert meta["trading_action"] == "LONG"
@@ -62,7 +63,7 @@ def test_build_meta_signals_can_turn_long_after_confirmation(tmp_path):
     assert meta["vote_score"] > 0.2
 
 
-def test_apply_meta_signal_persistence_holds_pending_flip():
+def test_apply_signal_persistence_holds_pending_flip():
     raw_signal = {
         "signal": "Brazil soy meta-short",
         "confidence": "Medium",
@@ -75,12 +76,32 @@ def test_apply_meta_signal_persistence_holds_pending_flip():
         "pending_count": 0,
     }
 
-    persisted, next_state = apply_meta_signal_persistence(raw_signal, previous_state, confirmations_required=2)
+    persisted, next_state = apply_signal_persistence(raw_signal, previous_state, confirmations_required=2)
 
     assert persisted["trading_action"] == "LONG"
     assert persisted["raw_trading_action"] == "SHORT"
     assert next_state["pending_action"] == "SHORT"
     assert next_state["pending_count"] == 1
+
+
+def test_apply_signal_persistence_for_single_region():
+    raw_signal = {
+        "signal": "Long crop",
+        "confidence": "Medium",
+        "actionability": "Actionable",
+        "trading_action": "LONG",
+    }
+    previous_state = {
+        "live_action": "FLAT",
+        "pending_action": "FLAT",
+        "pending_count": 0,
+    }
+
+    persisted, next_state = apply_signal_persistence(raw_signal, previous_state, confirmations_required=2)
+
+    assert persisted["trading_action"] == "FLAT"
+    assert persisted["raw_trading_action"] == "LONG"
+    assert next_state["pending_action"] == "LONG"
 
 
 def test_update_portfolio_uses_meta_signal_not_subregions(tmp_path):

@@ -136,6 +136,8 @@
       "type": "agriculture",
       "active": true,
       "description": "Northern Mato Grosso soybean production belt",
+      "meta_group": "brazil_soy",
+      "meta_weight": 0.35,
       "country": "Brazil",
       "instruments": [
         "Soybeans"
@@ -152,6 +154,8 @@
       "type": "agriculture",
       "active": true,
       "description": "Central Mato Grosso soybean production belt",
+      "meta_group": "brazil_soy",
+      "meta_weight": 0.4,
       "country": "Brazil",
       "instruments": [
         "Soybeans"
@@ -168,6 +172,8 @@
       "type": "agriculture",
       "active": true,
       "description": "Southeastern Mato Grosso soybean production belt",
+      "meta_group": "brazil_soy",
+      "meta_weight": 0.25,
       "country": "Brazil",
       "instruments": [
         "Soybeans"

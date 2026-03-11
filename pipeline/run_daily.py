@@ -17,6 +17,94 @@ from pipeline.signals_multi import generate_signal
 from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
 
 
+CONFIDENCE_WEIGHTS = {
+    "High": 1.0,
+    "Medium": 0.6,
+    "Low": 0.25,
+}
+
+
+def _signal_vote(signal: Dict) -> float:
+    action = signal.get("trading_action", "FLAT")
+    direction = 1.0 if action == "LONG" else -1.0 if action == "SHORT" else 0.0
+    confidence = CONFIDENCE_WEIGHTS.get(signal.get("confidence", "Low"), 0.25)
+    return direction * confidence
+
+
+def build_meta_signals(signals: Dict, region_configs: Dict) -> Dict:
+    grouped_regions = {}
+    for region_id, config in region_configs.items():
+        group = config.get("meta_group")
+        if not group:
+            continue
+        grouped_regions.setdefault(group, []).append((region_id, config))
+
+    meta_signals = {}
+    for group, members in grouped_regions.items():
+        weighted_votes = []
+        constituents = []
+
+        for region_id, config in members:
+            signal = signals.get(region_id)
+            if not signal:
+                continue
+            weight = float(config.get("meta_weight", 1.0))
+            vote = _signal_vote(signal)
+            weighted_votes.append((weight, vote))
+            constituents.append({
+                "region": region_id,
+                "weight": weight,
+                "action": signal.get("trading_action", "FLAT"),
+                "confidence": signal.get("confidence", "Low"),
+                "signal": signal.get("signal", "No data"),
+            })
+
+        if not weighted_votes:
+            continue
+
+        total_weight = sum(weight for weight, _ in weighted_votes)
+        vote_score = sum(weight * vote for weight, vote in weighted_votes) / total_weight if total_weight else 0.0
+
+        if vote_score >= 0.2:
+            trading_action = "LONG"
+            signal_text = "Brazil soy meta-long"
+            bias = "Bullish soybean prices"
+            actionability = "Actionable"
+        elif vote_score <= -0.2:
+            trading_action = "SHORT"
+            signal_text = "Brazil soy meta-short"
+            bias = "Bearish soybean prices"
+            actionability = "Actionable"
+        else:
+            trading_action = "FLAT"
+            signal_text = "Brazil soy meta-neutral"
+            bias = "Mixed regional soybean signal"
+            actionability = "Ignore"
+
+        abs_score = abs(vote_score)
+        if abs_score >= 0.6:
+            confidence = "High"
+        elif abs_score >= 0.3:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+
+        meta_signals[f"{group}_meta"] = {
+            "signal": signal_text,
+            "confidence": confidence,
+            "actionability": actionability,
+            "trading_action": trading_action,
+            "type": "meta_agriculture",
+            "instruments": ["Soybeans"],
+            "bias": bias,
+            "meta_group": group,
+            "vote_score": vote_score,
+            "constituents": constituents,
+        }
+
+    return meta_signals
+
+
 def _extract_signal_frame(region_type: str, detection: dict, region_id: str, output_base: str) -> pd.DataFrame:
     live_frame = pd.DataFrame()
     metadata = detection.get("metadata", {}) if isinstance(detection, dict) else {}
@@ -188,6 +276,8 @@ def run_daily_pipeline(
         print(f"  Status: {status} {result['status']}")
     
     # Save summary
+    signals.update(build_meta_signals(signals, active_regions))
+
     summary = {
         "date": target_date,
         "regions_processed": len(results),

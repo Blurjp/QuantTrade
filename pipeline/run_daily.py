@@ -9,11 +9,43 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 import json
 from typing import Dict, List, Optional
+import pandas as pd
 
-from pipeline.regions import load_registry, get_active_regions
+from pipeline.regions import get_active_regions
 from pipeline.detection_multi import run_detection
 from pipeline.signals_multi import generate_signal
 from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
+
+
+def _extract_signal_frame(region_type: str, detection: dict, region_id: str, output_base: str) -> pd.DataFrame:
+    live_frame = pd.DataFrame()
+    details = detection.get("details", []) if isinstance(detection, dict) else []
+    if details:
+        row = dict(details[0])
+        row.setdefault("date", detection.get("date"))
+        live_frame = pd.DataFrame([row])
+
+    backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
+    if backfill_file.exists():
+        history = json.loads(backfill_file.read_text())
+        stats = history.get("daily_stats") or history.get("weekly_stats") or []
+        frame = pd.DataFrame(stats)
+        if not frame.empty and 'date' in frame.columns:
+            if not live_frame.empty and 'date' in live_frame.columns:
+                merged = pd.concat([frame, live_frame], ignore_index=True, sort=False)
+                merged = merged.sort_values('date').drop_duplicates(subset=['date'], keep='last')
+                return merged
+            return frame.sort_values('date')
+
+    if not live_frame.empty:
+        return live_frame
+
+    count = detection.get("count") if isinstance(detection, dict) else None
+    target_date = detection.get("date") if isinstance(detection, dict) else None
+    if region_type in {"chokepoint", "port_logistics"} and count is not None and target_date:
+        return pd.DataFrame([{"date": target_date, "detections": count}])
+
+    return pd.DataFrame()
 
 
 def process_region(
@@ -21,7 +53,7 @@ def process_region(
     region_config: dict,
     target_date: str,
     output_base: str = "outputs",
-) -> dict:
+) -> Dict:
     """
     Process a single region for a given date.
     
@@ -36,6 +68,14 @@ def process_region(
     """
     region_type = region_config.get("type")
     aoi_file = region_config.get("aoi_file")
+
+    if not isinstance(region_type, str):
+        return {
+            "region": region_id,
+            "date": target_date,
+            "status": "error",
+            "message": f"Unknown monitoring type for {region_id}",
+        }
     
     if not aoi_file or not Path(aoi_file).exists():
         return {
@@ -74,10 +114,10 @@ def process_region(
 
 
 def run_daily_pipeline(
-    target_date: str = None,
+    target_date: Optional[str] = None,
     output_base: str = "outputs",
-    regions_filter: List[str] = None,
-) -> dict:
+    regions_filter: Optional[List[str]] = None,
+) -> Dict:
     """
     Run daily pipeline for all active regions.
     
@@ -92,21 +132,7 @@ def run_daily_pipeline(
     if target_date is None:
         target_date = date.today().isoformat()
     
-    # Load registry
-    registry_path = Path("configs/regions/registry_v2.json")
-    if not registry_path.exists():
-        registry_path = Path("configs/regions/registry.json")
-    
-    with open(registry_path) as f:
-        registry = json.load(f)
-    
-    regions = registry.get("regions", {})
-    
-    # Filter to active regions
-    active_regions = {
-        rid: rconfig for rid, rconfig in regions.items()
-        if rconfig.get("active", False)
-    }
+    active_regions = get_active_regions()
     
     if regions_filter:
         active_regions = {
@@ -132,14 +158,27 @@ def run_daily_pipeline(
         
         results.append(result)
         
-        # Generate signal placeholder (would use actual data in production)
-        signals[region_id] = {
-            "signal": "Pending data",
+        signal_payload = {
+            "signal": "No data",
             "confidence": "Low",
             "actionability": "Ignore",
+            "trading_action": "FLAT",
             "type": region_config.get("type"),
             "instruments": region_config.get("instruments", []),
         }
+
+        if result["status"] == "success":
+            frame = _extract_signal_frame(
+                region_config.get("type"),
+                result.get("detection", {}),
+                region_id,
+                output_base,
+            )
+            if not frame.empty:
+                generated_signal = generate_signal(region_config.get("type"), frame)
+                signal_payload.update(generated_signal)
+
+        signals[region_id] = signal_payload
         
         status = "✅" if result["status"] == "success" else "❌"
         print(f"  Status: {status} {result['status']}")
@@ -172,7 +211,7 @@ def update_portfolio_with_signals(
     portfolio: MultiAssetPortfolio,
     signals: Dict,
     prices: Dict[str, float],
-) -> dict:
+) -> List[Dict]:
     """
     Update portfolio based on signals.
     
@@ -252,4 +291,6 @@ if __name__ == "__main__":
         regions_filter=args.regions,
     )
     
+    actionable = sum(1 for signal in summary["signals"].values() if signal.get("actionability") == "Actionable")
     print(f"\nPipeline complete. {summary['regions_successful']}/{summary['regions_processed']} regions processed successfully.")
+    print(f"Actionable signals: {actionable}")

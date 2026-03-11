@@ -10,12 +10,91 @@ Tests historical signals against actual price movements to:
 import json
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 
 
-def load_backfill_data(region_id: str, output_base: str = "outputs") -> Dict:
+def _seasonal_series_baseline(
+    df: pd.DataFrame,
+    value_column: str,
+    week_window: int = 2,
+    min_history: int = 3,
+) -> pd.Series:
+    dates = pd.to_datetime(df['date'])
+    iso_weeks = dates.dt.isocalendar().week.astype(int)
+    baseline = pd.Series(index=df.index, dtype=float)
+
+    for idx in df.index:
+        historical = df.loc[df.index < idx, ['date', value_column]].copy()
+        historical = historical.dropna(subset=[value_column])
+
+        if historical.empty:
+            baseline.loc[idx] = np.nan
+            continue
+
+        current_week = int(iso_weeks.loc[idx])
+        historical_dates = pd.to_datetime(historical['date'])
+        historical_weeks = historical_dates.dt.isocalendar().week.astype(int)
+        week_distance = (historical_weeks - current_week).abs()
+        wrapped_distance = np.minimum(week_distance, 52 - week_distance)
+        seasonal = historical.loc[wrapped_distance <= week_window, value_column]
+
+        if len(seasonal) < min_history:
+            seasonal = historical[value_column]
+
+        baseline.loc[idx] = seasonal.mean() if len(seasonal) else np.nan
+
+    return baseline
+
+
+def _generate_signal_direction(
+    df: pd.DataFrame,
+    signal_type: str,
+    threshold: Optional[float] = None,
+) -> pd.DataFrame:
+    df = df.copy()
+    df['signal_direction'] = 'neutral'
+    df['signal_raw'] = 0.0
+
+    if signal_type == "chokepoint":
+        if 'detections' in df.columns:
+            baseline = df['detections'].rolling(7, min_periods=3).mean()
+            df['signal_raw'] = np.where(baseline > 0, (df['detections'] - baseline) / baseline, 0)
+            limit = 0.10 if threshold is None else threshold
+            df['signal_direction'] = np.where(df['signal_raw'] < -limit, 'long_disruption',
+                                              np.where(df['signal_raw'] > limit, 'short_disruption', 'neutral'))
+
+    elif signal_type == "port_logistics":
+        if 'detections' in df.columns:
+            baseline = df['detections'].rolling(7, min_periods=3).mean()
+            df['signal_raw'] = np.where(baseline > 0, (df['detections'] - baseline) / baseline, 0)
+            limit = 0.2 if threshold is None else threshold
+            df['signal_direction'] = np.where(df['signal_raw'] > limit, 'long',
+                                              np.where(df['signal_raw'] < -limit, 'short', 'neutral'))
+
+    elif signal_type in ["agricultural", "agriculture", "oil_storage", "auto_inventory"]:
+        if 'ndvi_mean' in df.columns:
+            if signal_type in ["agricultural", "agriculture"]:
+                baseline = _seasonal_series_baseline(df, 'ndvi_mean')
+                limit = 0.03 if threshold is None else threshold
+            else:
+                baseline = df['ndvi_mean'].rolling(7, min_periods=3).mean()
+                limit = 0.05 if threshold is None else threshold
+
+            df['signal_raw'] = np.where(baseline > 0, (df['ndvi_mean'] - baseline) / baseline, 0)
+
+            if signal_type == "auto_inventory":
+                df['signal_direction'] = np.where(df['signal_raw'] < -limit, 'long',
+                                                  np.where(df['signal_raw'] > limit, 'short', 'neutral'))
+            else:
+                df['signal_direction'] = np.where(df['signal_raw'] > limit, 'short',
+                                                  np.where(df['signal_raw'] < -limit, 'long', 'neutral'))
+
+    return df
+
+
+def load_backfill_data(region_id: str, output_base: str = "outputs") -> Optional[Dict]:
     """Load backfilled detection data for a region."""
     backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
     if not backfill_file.exists():
@@ -90,6 +169,7 @@ def calculate_price_returns(prices: pd.DataFrame, forward_days: int = 5) -> pd.D
 def generate_historical_signals(
     detection_data: Dict,
     signal_type: str = "chokepoint",
+    threshold: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Generate signals from historical detection data.
@@ -113,48 +193,7 @@ def generate_historical_signals(
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date')
     
-    # Default neutral
-    df['signal_direction'] = 'neutral'
-    df['signal_raw'] = 0
-    
-    if signal_type == "chokepoint":
-        # For chokepoints: low detections = disruption, high = normal
-        if 'detections' in df.columns:
-            # Calculate baseline
-            baseline = df['detections'].rolling(7, min_periods=3).mean()
-            
-            # Signal: deviation from baseline
-            # 优化: 降低阈值从0.3 (30%) 至 0.10 (10%)
-            df['signal_raw'] = (df['detections'] - baseline) / baseline
-            df['signal_direction'] = np.where(df['signal_raw'] < -0.10, 'long_disruption',
-                                              np.where(df['signal_raw'] > 0.10, 'short_disruption', 'neutral'))
-    
-    elif signal_type == "port_logistics":
-        # For ports: high activity = bullish logistics
-        if 'detections' in df.columns:
-            baseline = df['detections'].rolling(7, min_periods=3).mean()
-            df['signal_raw'] = (df['detections'] - baseline) / baseline
-            # High port activity = bullish supply chain
-            df['signal_direction'] = np.where(df['signal_raw'] > 0.2, 'long',
-                                              np.where(df['signal_raw'] < -0.2, 'short', 'neutral'))
-    
-    elif signal_type in ["agricultural", "agriculture", "oil_storage", "auto_inventory"]:
-        # NDVI-based signals
-        if 'ndvi_mean' in df.columns:
-            baseline = df['ndvi_mean'].rolling(7, min_periods=3).mean()  # 降低窗口期
-            df['signal_raw'] = (df['ndvi_mean'] - baseline) / baseline
-            
-            # For agriculture: high NDVI = good crop = bearish prices
-            # For auto: low NDVI (dark parking lots) = high inventory = bearish
-            # 优化: 降低阈值从0.1 (10%) 至 0.03 (3%)
-            if signal_type == "auto_inventory":
-                df['signal_direction'] = np.where(df['signal_raw'] < -0.05, 'long',
-                                                  np.where(df['signal_raw'] > 0.05, 'short', 'neutral'))
-            else:  # agricultural
-                df['signal_direction'] = np.where(df['signal_raw'] > 0.03, 'short',
-                                                  np.where(df['signal_raw'] < -0.03, 'long', 'neutral'))
-    
-    return df
+    return _generate_signal_direction(df, signal_type, threshold)
 
 
 def backtest_signals(
@@ -349,7 +388,7 @@ def optimize_thresholds(
     region_id: str,
     ticker: str,
     output_base: str = "outputs",
-    threshold_range: List[float] = None,
+    threshold_range: Optional[List[float]] = None,
 ) -> Dict:
     """
     Find optimal signal thresholds through grid search.
@@ -388,10 +427,12 @@ def optimize_thresholds(
     
     for threshold in threshold_range:
         # Generate signals with this threshold
-        signals = generate_historical_signals(detection_data, detection_data.get("type", "chokepoint"))
-        
-        # Override threshold (would need to modify signal generation)
-        # For now, just run backtest
+        signals = generate_historical_signals(
+            detection_data,
+            detection_data.get("type", "chokepoint"),
+            threshold=threshold,
+        )
+
         backtest = backtest_signals(signals, prices, 5)
         
         accuracy = backtest.get("overall_accuracy", 0)

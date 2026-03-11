@@ -1,23 +1,34 @@
 """
-Region registry and path resolution for multi-chokepoint monitoring.
+Region registry helpers for multi-asset monitoring.
 """
 
 import json
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
 
+REGISTRY_V2_PATH = Path("configs/regions/registry_v2.json")
 REGISTRY_PATH = Path("configs/regions/registry.json")
 
 
-def load_region_registry(registry_path: str | Path = REGISTRY_PATH) -> dict:
-    path = Path(registry_path)
-    with open(path) as f:
-        data = json.load(f)
+def _default_registry_path() -> Path:
+    if REGISTRY_V2_PATH.exists():
+        return REGISTRY_V2_PATH
+    return REGISTRY_PATH
 
+
+def load_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:
+    path = Path(registry_path) if registry_path else _default_registry_path()
+    with open(path) as f:
+        return json.load(f)
+
+
+def load_region_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:
+    data = load_registry(registry_path)
     return data.get("regions", {})
 
 
-def list_regions(registry_path: str | Path = REGISTRY_PATH) -> list[dict]:
+def list_regions(registry_path: Optional[Union[str, Path]] = None) -> List[Dict]:
     regions = load_region_registry(registry_path)
     return [
         {
@@ -29,7 +40,7 @@ def list_regions(registry_path: str | Path = REGISTRY_PATH) -> list[dict]:
     ]
 
 
-def get_region_config(region_id: str, registry_path: str | Path = REGISTRY_PATH) -> dict:
+def get_region_config(region_id: str, registry_path: Optional[Union[str, Path]] = None) -> Dict:
     regions = load_region_registry(registry_path)
     if region_id not in regions:
         raise KeyError(f"Unknown region: {region_id}")
@@ -39,9 +50,18 @@ def get_region_config(region_id: str, registry_path: str | Path = REGISTRY_PATH)
     return config
 
 
-def resolve_region_paths(region_id: str, registry_path: str | Path = REGISTRY_PATH) -> tuple[str, str]:
+def resolve_region_paths(region_id: str, registry_path: Optional[Union[str, Path]] = None) -> Tuple[Optional[str], Optional[str]]:
     config = get_region_config(region_id, registry_path)
-    return config["aoi_path"], config["gate_path"]
+    return config.get("aoi_path", config.get("aoi_file")), config.get("gate_path", config.get("gate_file"))
+
+
+def get_active_regions(registry_path: Optional[Union[str, Path]] = None) -> Dict:
+    regions = load_region_registry(registry_path)
+    return {
+        region_id: config
+        for region_id, config in regions.items()
+        if config.get("active", False)
+    }
 
 
 def resolve_region_output_base(output_base: str = "outputs", region_id: str = "hormuz") -> str:
@@ -53,3 +73,14 @@ def resolve_region_output_base(output_base: str = "outputs", region_id: str = "h
         return str(base)
 
     return str(region_base)
+
+
+__all__ = [
+    "get_active_regions",
+    "get_region_config",
+    "list_regions",
+    "load_region_registry",
+    "load_registry",
+    "resolve_region_output_base",
+    "resolve_region_paths",
+]

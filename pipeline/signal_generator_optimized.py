@@ -2,14 +2,43 @@
 Optimized signal generation with lower thresholds.
 """
 from datetime import date, timedelta
-from typing import Dict, Optional
+from typing import Dict, Tuple
 import pandas as pd
 import numpy as np
+
+
+def _seasonal_ndvi_baseline(
+    crop_data: pd.DataFrame,
+    week_window: int = 2,
+    min_history: int = 3,
+) -> Tuple[float, int]:
+    df = crop_data.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values('date')
+
+    current_week = int(df.iloc[-1]['date'].isocalendar().week)
+    historical = df.iloc[:-1].copy()
+    if historical.empty:
+        return float(df['ndvi_mean'].dropna().mean()), int(df['ndvi_mean'].dropna().shape[0])
+
+    historical['iso_week'] = historical['date'].dt.isocalendar().week.astype(int)
+    week_distance = (historical['iso_week'] - current_week).abs()
+    wrapped_distance = np.minimum(week_distance, 52 - week_distance)
+    seasonal = historical.loc[wrapped_distance <= week_window, 'ndvi_mean'].dropna()
+
+    if len(seasonal) < min_history:
+        seasonal = historical['ndvi_mean'].dropna()
+
+    if seasonal.empty:
+        return 0.0, 0
+
+    return float(seasonal.mean()), int(len(seasonal))
 
 
 def generate_agricultural_signal_optimized(
     crop_data: pd.DataFrame,
     threshold: float = 0.03,  # 降低至3% (原来是5-10%)
+    week_window: int = 2,
 ) -> Dict:
     """
     Generate signal for crop yields with lower threshold.
@@ -23,8 +52,10 @@ def generate_agricultural_signal_optimized(
     
     current_ndvi = crop_data.iloc[-1]['ndvi_mean']
     
-    # Compare to rolling baseline
-    baseline_ndvi = crop_data['ndvi_mean'].rolling(7, min_periods=3).mean().iloc[-1]
+    baseline_ndvi, baseline_count = _seasonal_ndvi_baseline(
+        crop_data,
+        week_window=week_window,
+    )
     
     if baseline_ndvi > 0:
         ndvi_pct = current_ndvi / baseline_ndvi
@@ -63,6 +94,7 @@ def generate_agricultural_signal_optimized(
         "ndvi_baseline": baseline_ndvi,
         "ndvi_change": ndvi_change,
         "ndvi_pct": ndvi_pct,
+        "baseline_samples": baseline_count,
     }
 
 

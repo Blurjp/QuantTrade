@@ -5,7 +5,7 @@ Signal Scoring System
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 class SignalScorer:
     """
@@ -19,6 +19,8 @@ class SignalScorer:
     def load_all_signals(self):
         """加载所有回测结果"""
         backtest_dir = Path("outputs/backtest")
+        if not backtest_dir.exists():
+            return
         
         for file in backtest_dir.glob("*.json"):
             data = json.loads(file.read_text())
@@ -55,11 +57,17 @@ class SignalScorer:
                 accuracy_score = 10
             
             # Sample size score (30 points)
-            if total_signals >= 30:
+            directional_signals = sum(
+                stats.get("count", 0)
+                for direction, stats in by_direction.items()
+                if direction not in ["neutral", "No trade"]
+            )
+
+            if directional_signals >= 30:
                 sample_score = 30
-            elif total_signals >= 10:
+            elif directional_signals >= 10:
                 sample_score = 20
-            elif total_signals >= 5:
+            elif directional_signals >= 5:
                 sample_score = 10
             else:
                 sample_score = 5
@@ -93,12 +101,13 @@ class SignalScorer:
                 "best_direction": best_direction,
                 "best_accuracy": best_accuracy,
                 "total_signals": total_signals,
+                "directional_signals": directional_signals,
                 "score": total_score,
                 "rating": rating,
                 "recommendation": recommendation
             }
     
-    def get_top_signals(self, n: int = 5) -> List[Dict]:
+    def get_top_signals(self, n: int = 5) -> List[Tuple[str, Dict]]:
         """获取评分最高的N个信号"""
         sorted_signals = sorted(
             self.signals.items(),

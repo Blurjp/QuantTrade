@@ -6,7 +6,7 @@ Each module implements a standard interface:
 """
 
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Dict, List, Optional
 import json
 
 
@@ -18,8 +18,8 @@ class DetectionResult:
         detection_type: str,
         date: str,
         count: int,
-        details: List[Dict] = None,
-        metadata: Dict = None
+        details: Optional[List[Dict]] = None,
+        metadata: Optional[Dict] = None
     ):
         self.detection_type = detection_type
         self.date = date
@@ -43,9 +43,6 @@ def detect_ships_sar(aoi_path: str, target_date: str, output_base: str = "output
     
     Used for: chokepoints, ports
     """
-    # Import existing detection logic
-    from pipeline.detection import run_cfar_detection
-    
     # Run detection
     # ... (existing logic)
     
@@ -138,29 +135,47 @@ def detect_crop_health(aoi_path: str, target_date: str, output_base: str = "outp
     2. Compare to historical baseline
     3. Anomaly indicates yield deviation
     """
-    import numpy as np
-    
-    # TODO: Implement crop health detection
-    # In production:
-    # 1. Load Sentinel-2 scene
-    # 2. Calculate NDVI = (NIR - Red) / (NIR + Red)
-    # 3. Load 5-year baseline for same date
-    # 4. Calculate anomaly = current - baseline
-    
+    from pipeline.detection_agriculture import process_sentinel2_for_ndvi
+
+    result = process_sentinel2_for_ndvi(
+        aoi_path=aoi_path,
+        target_date=target_date,
+        output_base=output_base,
+    )
+
+    ndvi_stats = result.get("ndvi_stats", {})
+    health_distribution = result.get("health_distribution", {})
+    valid_pixels = ndvi_stats.get("valid_pixels", 0)
+
+    metadata = {
+        "data_source": "Sentinel-2",
+        "method": "NDVI",
+        "seasonal": True,
+        "status": result.get("status", "unknown"),
+    }
+    if "cloud_cover" in result:
+        metadata["cloud_cover"] = result["cloud_cover"]
+    if "scene_id" in result:
+        metadata["scene_id"] = result["scene_id"]
+    if result.get("status") != "success":
+        metadata["message"] = result.get("message") or result.get("error")
+
+    details = [{
+        "ndvi_mean": ndvi_stats.get("mean", 0.0),
+        "ndvi_median": ndvi_stats.get("median", 0.0),
+        "ndvi_std": ndvi_stats.get("std", 0.0),
+        "valid_pixels": valid_pixels,
+        "healthy_share": health_distribution.get("healthy", 0.0),
+        "very_healthy_share": health_distribution.get("very_healthy", 0.0),
+        "aoi": result.get("aoi"),
+    }]
+
     return DetectionResult(
         detection_type="crop_health",
         date=target_date,
-        count=1,  # One aggregate metric
-        details=[{
-            "ndvi_mean": 0.0,
-            "ndvi_anomaly": 0.0,
-            "area_hectares": 0,
-        }],
-        metadata={
-            "data_source": "Sentinel-2",
-            "method": "NDVI",
-            "seasonal": True,
-        },
+        count=max(1, int(valid_pixels > 0)),
+        details=details,
+        metadata=metadata,
     )
 
 
@@ -203,6 +218,7 @@ DETECTION_REGISTRY = {
     "auto_inventory": detect_vehicles_optical,
     "oil_storage": detect_tank_levels,
     "agricultural": detect_crop_health,
+    "agriculture": detect_crop_health,
 }
 
 

@@ -113,6 +113,7 @@
     "brazil_soy": {
       "name": "Brazil Soybean Regions",
       "type": "agriculture",
+      "active": true,
       "description": "Mato Grosso soybean production",
       "center": [
         -55.0,
@@ -120,6 +121,9 @@
       ],
       "radius_km": 200,
       "country": "Brazil",
+      "instruments": [
+        "Soybeans"
+      ],
       "signal_asset": "Soybeans",
       "detection_method": "ndvi",
       "collection": "sentinel-2-l2a",
@@ -144,8 +148,8 @@
       "aoi_file": "configs/aoi/panama_canal.json"
     }
   },
-  "active_count": 11,
-  "total_count": 9,
+  "active_count": 7,
+  "total_count": 11,
   "notes": {
     "detection_status": {
       "chokepoint": "\u2705 Production",

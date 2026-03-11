@@ -5,9 +5,45 @@ Each monitoring type has its own signal logic.
 """
 
 from datetime import date, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 import pandas as pd
 import numpy as np
+
+
+def _seasonal_baseline(
+    data: pd.DataFrame,
+    value_column: str,
+    week_window: int = 2,
+    min_history: int = 3,
+) -> Tuple[float, float, int]:
+    """Build a same-season baseline with a nearby-week fallback."""
+    if data.empty:
+        return 0.0, 0.0, 0
+
+    df = data.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+
+    current = df.iloc[-1]
+    current_week = int(current["date"].isocalendar().week)
+
+    historical = df.iloc[:-1].copy()
+    if historical.empty:
+        values = df[value_column].dropna()
+        return float(values.mean()), float(values.std(ddof=0)), len(values)
+
+    historical["iso_week"] = historical["date"].dt.isocalendar().week.astype(int)
+    week_distance = (historical["iso_week"] - current_week).abs()
+    wrapped_distance = np.minimum(week_distance, 52 - week_distance)
+    seasonal = historical[wrapped_distance <= week_window][value_column].dropna()
+
+    if len(seasonal) < min_history:
+        seasonal = historical[value_column].dropna()
+
+    if seasonal.empty:
+        return 0.0, 0.0, 0
+
+    return float(seasonal.mean()), float(seasonal.std(ddof=0)), int(len(seasonal))
 
 
 def generate_chokepoint_signal(
@@ -136,7 +172,7 @@ def generate_retail_signal(
 
 def generate_storage_signal(
     tank_data: pd.DataFrame,
-    eia_baseline: float = None,
+    eia_baseline: Optional[float] = None,
 ) -> Dict:
     """
     Generate signal for oil storage levels.
@@ -197,7 +233,9 @@ def generate_storage_signal(
 
 def generate_agricultural_signal(
     crop_data: pd.DataFrame,
-    usda_forecast: float = None,
+    usda_forecast: Optional[float] = None,
+    threshold: float = 0.05,
+    week_window: int = 2,
 ) -> Dict:
     """
     Generate signal for crop yields.
@@ -210,17 +248,14 @@ def generate_agricultural_signal(
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
     
     current_ndvi = crop_data.iloc[-1]['ndvi_mean']
-    
-    # Compare to 5-year average for same week
-    current_week = pd.Timestamp(crop_data.iloc[-1]['date']).week
-    historical = crop_data[pd.to_datetime(crop_data['date']).dt.week == current_week]
-    
-    if len(historical) > 1:
-        baseline_ndvi = historical[:-1]['ndvi_mean'].mean()
-        baseline_std = historical[:-1]['ndvi_mean'].std()
-    else:
-        baseline_ndvi = crop_data['ndvi_mean'].mean()
-        baseline_std = crop_data['ndvi_mean'].std()
+    baseline_ndvi, baseline_std, baseline_count = _seasonal_baseline(
+        crop_data,
+        "ndvi_mean",
+        week_window=week_window,
+    )
+
+    if baseline_ndvi <= 0:
+        baseline_ndvi = float(crop_data['ndvi_mean'].dropna().mean()) if not crop_data['ndvi_mean'].dropna().empty else 0
     
     if baseline_std > 0:
         zscore = (current_ndvi - baseline_ndvi) / baseline_std
@@ -229,14 +264,15 @@ def generate_agricultural_signal(
     
     # Signal logic
     ndvi_pct = current_ndvi / baseline_ndvi if baseline_ndvi > 0 else 1
-    
-    if ndvi_pct > 1.05:
+    ndvi_change = (current_ndvi - baseline_ndvi) / baseline_ndvi if baseline_ndvi > 0 else 0
+
+    if ndvi_change > threshold:
         signal = "Short crop (bumper harvest)"
         confidence = "High" if zscore > 1.5 else "Medium"
         actionability = "Actionable"
         bias = "Bearish crop prices"
         trading_action = "SHORT"
-    elif ndvi_pct < 0.95:
+    elif ndvi_change < -threshold:
         signal = "Long crop (supply concerns)"
         confidence = "High" if zscore < -1.5 else "Medium"
         actionability = "Actionable"
@@ -259,6 +295,8 @@ def generate_agricultural_signal(
         "ndvi_current": current_ndvi,
         "ndvi_baseline": baseline_ndvi,
         "ndvi_pct": ndvi_pct,
+        "ndvi_change": ndvi_change,
+        "baseline_samples": baseline_count,
     }
 
 
@@ -325,6 +363,7 @@ SIGNAL_GENERATORS = {
     "retail_parking": generate_retail_signal,
     "oil_storage": generate_storage_signal,
     "agricultural": generate_agricultural_signal,
+    "agriculture": generate_agricultural_signal,
     "auto_inventory": generate_auto_inventory_signal,
 }
 

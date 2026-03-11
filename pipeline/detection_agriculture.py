@@ -94,7 +94,9 @@ def process_sentinel2_for_ndvi(
     import rasterio
     from rasterio.mask import mask as rasterio_mask
     import geopandas as gpd
-    from shapely.geometry import shape
+    from pyproj import Transformer
+    from shapely.geometry import box
+    from shapely.ops import transform
     
     # Load AOI
     aoi_gdf = gpd.read_file(aoi_path)
@@ -125,7 +127,7 @@ def process_sentinel2_for_ndvi(
         }
     
     # Use the first (least cloudy) item
-    item = min(items, key=lambda i: EO.ext(i).cloud_cover)
+    item = min(items, key=lambda i: EO.ext(i).cloud_cover or 100.0)
     
     # Load Red (B4) and NIR (B8) bands
     red_href = item.assets["B04"].href
@@ -139,15 +141,30 @@ def process_sentinel2_for_ndvi(
         "cloud_cover": EO.ext(item).cloud_cover,
         "aoi_name": aoi_gdf.iloc[0].get("name", "unknown") if len(aoi_gdf) > 0 else "unknown",
     }
+    output_path = Path(output_base) / target_date / "agriculture"
+    output_path.mkdir(parents=True, exist_ok=True)
     
     try:
         with rasterio.open(red_href) as red_src, rasterio.open(nir_href) as nir_src:
+            transformer = Transformer.from_crs("EPSG:4326", red_src.crs, always_xy=True)
+            aoi_projected = transform(transformer.transform, aoi_geom)
+            raster_bbox = box(*red_src.bounds)
+
+            if not aoi_projected.intersects(raster_bbox):
+                results["status"] = "error"
+                results["error"] = "Input shapes do not overlap raster."
+                result_file = output_path / "ndvi_stats.json"
+                result_file.write_text(json.dumps(results, indent=2))
+                return results
+
+            intersection = aoi_projected.intersection(raster_bbox)
+
             # Crop to AOI
             out_image_red, out_transform = rasterio_mask(
-                red_src, [aoi_geom], crop=True
+                red_src, [intersection.__geo_interface__], crop=True
             )
             out_image_nir, _ = rasterio_mask(
-                nir_src, [aoi_geom], crop=True
+                nir_src, [intersection.__geo_interface__], crop=True
             )
             
             red = out_image_red[0].astype(float)
@@ -188,9 +205,6 @@ def process_sentinel2_for_ndvi(
             }
             
             # Save NDVI raster
-            output_path = Path(output_base) / target_date / "agriculture"
-            output_path.mkdir(parents=True, exist_ok=True)
-            
             ndvi_file = output_path / "ndvi.tif"
             with rasterio.open(
                 ndvi_file,

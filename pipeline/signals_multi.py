@@ -60,12 +60,15 @@ def generate_chokepoint_signal(
     if throughput_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
     
+    # Support both 'throughput_index' and 'detections' columns
+    value_column = 'throughput_index' if 'throughput_index' in throughput_data.columns else 'detections'
+    
     # Calculate rolling baseline
     recent = throughput_data.tail(baseline_window)
-    baseline_mean = recent['throughput_index'].mean()
-    baseline_std = recent['throughput_index'].std()
+    baseline_mean = recent[value_column].mean()
+    baseline_std = recent[value_column].std()
     
-    current_throughput = throughput_data.iloc[-1]['throughput_index']
+    current_throughput = throughput_data.iloc[-1][value_column]
     
     if baseline_std > 0:
         zscore = (current_throughput - baseline_mean) / baseline_std
@@ -114,8 +117,11 @@ def generate_retail_signal(
     if traffic_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
     
+    # Support both 'vehicle_count' and 'detections' columns
+    value_column = 'vehicle_count' if 'vehicle_count' in traffic_data.columns else 'detections'
+    
     # Compare to same period last year (seasonal adjustment)
-    current_traffic = traffic_data.iloc[-1]['vehicle_count']
+    current_traffic = traffic_data.iloc[-1][value_column]
     
     # Get historical same-week data
     current_week = pd.Timestamp(traffic_data.iloc[-1]['date']).week
@@ -124,11 +130,11 @@ def generate_retail_signal(
     ]
     
     if len(historical_same_week) > 1:
-        baseline = historical_same_week[:-1]['vehicle_count'].mean()
-        baseline_std = historical_same_week[:-1]['vehicle_count'].std()
+        baseline = historical_same_week[:-1][value_column].mean()
+        baseline_std = historical_same_week[:-1][value_column].std()
     else:
-        baseline = traffic_data['vehicle_count'].mean()
-        baseline_std = traffic_data['vehicle_count'].std()
+        baseline = traffic_data[value_column].mean()
+        baseline_std = traffic_data[value_column].std()
     
     if baseline_std > 0:
         zscore = (current_traffic - baseline) / baseline_std
@@ -313,12 +319,15 @@ def generate_auto_inventory_signal(
     if inventory_data.empty:
         return {"signal": "No data", "confidence": "Low", "actionability": "Ignore"}
     
-    current_inventory = inventory_data.iloc[-1]['vehicle_count']
+    # Support both 'vehicle_count' and 'detections' columns
+    value_column = 'vehicle_count' if 'vehicle_count' in inventory_data.columns else 'detections'
+    
+    current_inventory = inventory_data.iloc[-1][value_column]
     
     # Calculate trend
     recent = inventory_data.tail(4)
     if len(recent) > 1:
-        baseline = recent[:-1]['vehicle_count'].mean()
+        baseline = recent[:-1][value_column].mean()
         trend = (current_inventory - baseline) / baseline if baseline > 0 else 0
     else:
         baseline = current_inventory

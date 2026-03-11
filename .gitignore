@@ -35,8 +35,19 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data (large files)
-outputs/
+# Data (large files) - ignore daily detection data
+outputs/2026-*/
+outputs/market_data/
+
+# Keep important data (backfill, backtest, paper_trading, daily_reports)
+!outputs/backfill/
+!outputs/backtest/
+!outputs/paper_trading/
+!outputs/daily_reports/
+!outputs/*.json
+!outputs/*.md
+
+# Large binary files (use Git LFS)
 *.parquet
 *.tif
 *.tiff
@@ -44,11 +55,6 @@ outputs/
 
 # Keep directory structure
 !outputs/.gitkeep
-!outputs/manifests/.gitkeep
-!outputs/detections/.gitkeep
-!outputs/tracklets/.gitkeep
-!outputs/metrics/.gitkeep
-!outputs/validation/.gitkeep
 
 # Logs
 *.log

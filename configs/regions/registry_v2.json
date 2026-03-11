@@ -111,10 +111,10 @@
       "description": "Largest US container port, 40% of imports"
     },
     "brazil_soy": {
-      "name": "Brazil Soybean Regions",
+      "name": "Brazil Soybean Regions Legacy",
       "type": "agriculture",
-      "active": true,
-      "description": "Mato Grosso soybean production",
+      "active": false,
+      "description": "Legacy broad Mato Grosso soybean region",
       "center": [
         -55.0,
         -13.0
@@ -129,7 +129,55 @@
       "collection": "sentinel-2-l2a",
       "season": "Oct-Apr",
       "created": "2026-03-10",
-      "aoi_file": "configs/aoi/brazil_soy.json"
+      "aoi_file": "configs/aoi/brazil_soy_central.json"
+    },
+    "brazil_soy_north": {
+      "name": "Brazil Soy North",
+      "type": "agriculture",
+      "active": true,
+      "description": "Northern Mato Grosso soybean production belt",
+      "country": "Brazil",
+      "instruments": [
+        "Soybeans"
+      ],
+      "signal_asset": "Soybeans",
+      "detection_method": "ndvi",
+      "collection": "sentinel-2-l2a",
+      "season": "Oct-Apr",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/brazil_soy_north.json"
+    },
+    "brazil_soy_central": {
+      "name": "Brazil Soy Central",
+      "type": "agriculture",
+      "active": true,
+      "description": "Central Mato Grosso soybean production belt",
+      "country": "Brazil",
+      "instruments": [
+        "Soybeans"
+      ],
+      "signal_asset": "Soybeans",
+      "detection_method": "ndvi",
+      "collection": "sentinel-2-l2a",
+      "season": "Oct-Apr",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/brazil_soy_central.json"
+    },
+    "brazil_soy_southeast": {
+      "name": "Brazil Soy Southeast",
+      "type": "agriculture",
+      "active": true,
+      "description": "Southeastern Mato Grosso soybean production belt",
+      "country": "Brazil",
+      "instruments": [
+        "Soybeans"
+      ],
+      "signal_asset": "Soybeans",
+      "detection_method": "ndvi",
+      "collection": "sentinel-2-l2a",
+      "season": "Oct-Apr",
+      "created": "2026-03-10",
+      "aoi_file": "configs/aoi/brazil_soy_southeast.json"
     },
     "panama_canal": {
       "name": "Panama Canal",
@@ -148,8 +196,8 @@
       "aoi_file": "configs/aoi/panama_canal.json"
     }
   },
-  "active_count": 7,
-  "total_count": 11,
+  "active_count": 9,
+  "total_count": 13,
   "notes": {
     "detection_status": {
       "chokepoint": "\u2705 Production",

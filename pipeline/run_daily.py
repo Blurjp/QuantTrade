@@ -19,8 +19,12 @@ from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
 
 def _extract_signal_frame(region_type: str, detection: dict, region_id: str, output_base: str) -> pd.DataFrame:
     live_frame = pd.DataFrame()
+    metadata = detection.get("metadata", {}) if isinstance(detection, dict) else {}
     details = detection.get("details", []) if isinstance(detection, dict) else []
-    if details:
+    live_detection_ok = metadata.get("status", "success") == "success"
+    valid_pixels = details[0].get("valid_pixels", 0) if details else 0
+
+    if details and (region_type not in {"agriculture", "agricultural"} or (live_detection_ok and valid_pixels > 0)):
         row = dict(details[0])
         row.setdefault("date", detection.get("date"))
         live_frame = pd.DataFrame([row])

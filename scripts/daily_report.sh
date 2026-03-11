@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_DIR="/Users/jianpinghuang/.openclaw/workspace/projects/QuantTrade"
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$PROJECT_DIR/logs"
 DATE=$(date +%Y-%m-%d)
 
@@ -31,3 +31,8 @@ report = generate_daily_report(
 
 print(format_report_message(report))
 " 2>&1
+
+echo
+echo "Brazil soy snapshot"
+echo "-------------------"
+python scripts/brazil_soy_report.py --date "$DATE" --output outputs 2>&1 || true

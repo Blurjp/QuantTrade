@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Mato Grosso Soy Southeast",
+        "type": "agriculture",
+        "description": "Southeastern Mato Grosso soybean belt"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-55.8, -16.0],
+          [-55.8, -13.8],
+          [-53.0, -13.8],
+          [-53.0, -16.0],
+          [-55.8, -16.0]
+        ]]
+      }
+    }
+  ]
+}

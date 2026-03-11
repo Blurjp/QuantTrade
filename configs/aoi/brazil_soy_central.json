@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Mato Grosso Soy Central",
+        "type": "agriculture",
+        "description": "Central Mato Grosso soybean belt"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-57.0, -14.4],
+          [-57.0, -12.4],
+          [-54.2, -12.4],
+          [-54.2, -14.4],
+          [-57.0, -14.4]
+        ]]
+      }
+    }
+  ]
+}

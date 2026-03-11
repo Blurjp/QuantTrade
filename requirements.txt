@@ -34,6 +34,10 @@ tqdm>=4.66.0
 pytest>=8.0.0
 scikit-learn>=1.4.0
 
+# LLM chat
+openai>=1.0.0
+anthropic>=0.20.0
+
 # Optional: visualization
 matplotlib>=3.8.0
 folium>=0.15.0

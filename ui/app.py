@@ -22,6 +22,7 @@ from pipeline.instruments import get_primary_instrument, list_region_instruments
 from pipeline.regions import list_regions, resolve_region_output_base
 from pipeline.signals import build_monitor_snapshot, latest_region_signal
 from pipeline.ui_data import list_available_days, load_day_bundle
+from ui.chat import ask, build_system_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -1009,6 +1010,85 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
             st.write(f"- {region_id}: {signal.get('signal')} | {signal.get('confidence')} | action={signal.get('trading_action')}")
 
 
+def _render_sidebar_chat(
+    st,
+    daily_summary: Dict,
+    persistence_state: Dict,
+    daily_brief: str,
+    selected_day: str,
+) -> None:
+    """Render the persistent chat panel in the Streamlit sidebar."""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 💬 Ask QuantTrade")
+    st.sidebar.caption(
+        "Ask anything about today's signals, how to trade on Fidelity, "
+        "or what a term means. Powered by GPT-4.1 → Claude Sonnet 4.6 fallback."
+    )
+
+    with st.sidebar.expander("API Keys (stored in session only)", expanded=False):
+        openai_key = st.text_input(
+            "OpenAI API Key", type="password", key="chat_openai_key",
+            help="Required for GPT-4.1 (primary). Leave blank to use env OPENAI_API_KEY.",
+        )
+        anthropic_key = st.text_input(
+            "Anthropic API Key", type="password", key="chat_anthropic_key",
+            help="Required for Claude Sonnet 4.6 (fallback). Leave blank to use env ANTHROPIC_API_KEY.",
+        )
+
+    # Initialise session state
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    if "chat_system_prompt" not in st.session_state:
+        st.session_state.chat_system_prompt = ""
+
+    # Rebuild system prompt whenever the day or summary changes
+    new_prompt = build_system_prompt(
+        daily_summary=daily_summary,
+        persistence_state=persistence_state,
+        daily_brief=daily_brief,
+        selected_day=selected_day,
+    )
+    if new_prompt != st.session_state.chat_system_prompt:
+        st.session_state.chat_system_prompt = new_prompt
+        # Don't wipe history — just update context silently
+
+    # Render conversation history (inside a scrollable container)
+    with st.sidebar.container():
+        for msg in st.session_state.chat_messages:
+            role_label = "**You**" if msg["role"] == "user" else f"**Assistant** _{msg.get('model', '')}_ "
+            if msg["role"] == "user":
+                st.sidebar.markdown(f"🧑 {role_label}: {msg['content']}")
+            else:
+                st.sidebar.markdown(f"🤖 {role_label}:\n\n{msg['content']}")
+
+    # Input form
+    with st.sidebar.form(key="chat_form", clear_on_submit=True):
+        user_input = st.text_area(
+            "Your question",
+            placeholder="e.g. 今天该怎么交易大豆? / What does FLAT mean?",
+            height=80,
+            key="chat_input",
+        )
+        col1, col2 = st.columns([3, 1])
+        submitted = col1.form_submit_button("Send")
+        col2.form_submit_button("Clear", on_click=lambda: st.session_state.update(chat_messages=[]))
+
+    if submitted and user_input.strip():
+        user_msg: Dict = {"role": "user", "content": user_input.strip()}
+        st.session_state.chat_messages.append(user_msg)
+
+        with st.sidebar:
+            with st.spinner("Thinking..."):
+                reply = ask(
+                    messages=st.session_state.chat_messages,
+                    system_prompt=st.session_state.chat_system_prompt,
+                    openai_api_key=openai_key or None,
+                    anthropic_api_key=anthropic_key or None,
+                )
+        st.session_state.chat_messages.append(reply)
+        st.rerun()
+
+
 def main():
     import streamlit as st
 
@@ -1077,6 +1157,17 @@ def main():
         _render_summary_header(st, selected_day, trade_signal, metrics_row, summary_day=summary_day)
     _render_trade_ticket(st, trade_ticket)
     _render_how_to_use(st)
+
+    # Sidebar chat — rendered after all data is loaded so context is complete
+    persistence_state = _load_persistence_state(output_base)
+    brief_text_for_chat = _load_daily_brief(output_base, summary_day)
+    _render_sidebar_chat(
+        st,
+        daily_summary=daily_summary,
+        persistence_state=persistence_state,
+        daily_brief=brief_text_for_chat,
+        selected_day=summary_day,
+    )
 
     metric_columns = st.columns(5)
     metric_columns[0].metric("数据覆盖率", _format_pct(metrics_row.get("coverage_score", 0)))

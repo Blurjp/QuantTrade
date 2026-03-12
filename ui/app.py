@@ -1025,39 +1025,88 @@ def _render_sidebar_chat(
         "or what a term means. Powered by ChatGPT Plus → GPT-4.1 → Claude Sonnet 4.6."
     )
 
-    with st.sidebar.expander("🔑 Authentication (stored in session only)", expanded=False):
-        st.markdown("**Free: ChatGPT Plus (uses your subscription)**")
+    # Check if token already set
+    has_token = bool(st.session_state.get("chat_chatgpt_token", ""))
+    expand_auth = not has_token
+
+    with st.sidebar.expander("🔑 Authentication (stored in session only)", expanded=expand_auth):
+        st.markdown("### 🆓 Free: ChatGPT Plus (uses your subscription)")
+        
         st.markdown(
             """
-            **How to get your access token:**
-            1. Open [chat.openai.com](https://chat.openai.com) in your browser
-            2. Log in with your ChatGPT Plus account
-            3. Open DevTools (F12 or Cmd+Option+I)
-            4. Go to **Application** → **Cookies** → `chat.openai.com`
-            5. Copy the value of `__Secure-next-auth.session-token`
-            6. Paste it below
-            """
+            <a href="https://chat.openai.com" target="_blank" style="
+                display: inline-block;
+                background: #10a37f;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                text-decoration: none;
+                font-weight: 600;
+                margin-bottom: 12px;
+            ">Open ChatGPT →</a>
+            """,
+            unsafe_allow_html=True,
         )
+        
+        with st.expander("📖 How to get your session token (click to expand)", expanded=False):
+            st.markdown(
+                """
+                **Step 1:** Click the green "Open ChatGPT" button above and log in with your ChatGPT Plus account.
+                
+                **Step 2:** Open Developer Tools
+                - **Mac:** Press `Cmd + Option + I`
+                - **Windows/Linux:** Press `F12`
+                - Or right-click anywhere → "Inspect"
+                
+                **Step 3:** Go to the **Application** tab (or **Storage** in some browsers)
+                
+                **Step 4:** In the left sidebar, expand **Cookies** → click on `https://chat.openai.com`
+                
+                **Step 5:** Find the cookie named:
+                ```
+                __Secure-next-auth.session-token
+                ```
+                
+                **Step 6:** Double-click the **Value** column to select it, then copy (Cmd+C / Ctrl+C)
+                
+                **Step 7:** Paste it in the box below
+                
+                ---
+                
+                ⚠️ **Notes:**
+                - This token expires every few hours/days. When chat stops working, just re-copy it.
+                - The token is stored only in your browser session, never saved to disk.
+                - If you don't have ChatGPT Plus, you can use the paid API keys below as fallback.
+                """
+            )
+        
         chatgpt_token = st.text_input(
             "ChatGPT Session Token",
             type="password",
             key="chat_chatgpt_token",
             help="Free — uses your ChatGPT Plus subscription. Token expires periodically; re-copy when needed.",
+            placeholder="Paste your __Secure-next-auth.session-token here...",
         )
         
+        if chatgpt_token:
+            st.success("✅ ChatGPT token set! You can now chat for free using your subscription.")
+        
         st.markdown("---")
-        st.markdown("**Paid fallbacks (optional):**")
+        st.markdown("### 💰 Paid fallbacks (optional)")
+        st.caption("Only used if ChatGPT token fails or is not set.")
         openai_key = st.text_input(
             "OpenAI API Key",
             type="password",
             key="chat_openai_key",
             help="Required for GPT-4.1 API fallback. Leave blank to use env OPENAI_API_KEY.",
+            placeholder="sk-...",
         )
         anthropic_key = st.text_input(
             "Anthropic API Key",
             type="password",
             key="chat_anthropic_key",
             help="Required for Claude Sonnet 4.6 fallback. Leave blank to use env ANTHROPIC_API_KEY.",
+            placeholder="sk-ant-...",
         )
 
     # Initialise session state

@@ -1174,7 +1174,22 @@ def _render_portfolio_monitor(st):
     if not portfolio_path.exists():
         return
     
-    portfolio = json.loads(portfolio_path.read_text())
+    raw_content = portfolio_path.read_text()
+    
+    # Handle Git LFS pointer (file not actually pulled)
+    if raw_content.startswith("version https://git-lfs.github.com/spec/v1"):
+        st.warning(
+            "Portfolio file is a Git LFS pointer. Run `git lfs pull` to fetch the actual data, "
+            "or create a new portfolio file."
+        )
+        return
+    
+    try:
+        portfolio = json.loads(raw_content)
+    except json.JSONDecodeError as e:
+        st.warning(f"Could not parse portfolio file: {e}")
+        return
+    
     positions = portfolio.get("positions", {})
     cash = portfolio.get("cash", 0)
     

@@ -22,6 +22,7 @@ from pipeline.instruments import get_primary_instrument, list_region_instruments
 from pipeline.regions import list_regions, resolve_region_output_base
 from pipeline.signals import build_monitor_snapshot, latest_region_signal
 from pipeline.ui_data import list_available_days, load_day_bundle
+from pipeline.price_feed import fetch_price_yahoo
 from ui.chat import ask, build_system_prompt
 
 
@@ -1164,15 +1165,170 @@ def _render_sidebar_chat(
         st.rerun()
 
 
+def _render_portfolio_monitor(st):
+    """Render real-time portfolio monitoring section"""
+    from datetime import datetime
+    
+    portfolio_path = PROJECT_ROOT / "outputs" / "paper_trading" / "multi_asset_portfolio.json"
+    
+    if not portfolio_path.exists():
+        return
+    
+    portfolio = json.loads(portfolio_path.read_text())
+    positions = portfolio.get("positions", {})
+    cash = portfolio.get("cash", 0)
+    
+    # Fetch current prices
+    tickers = list(positions.keys())
+    current_prices = {}
+    
+    for ticker in tickers:
+        try:
+            current_prices[ticker] = fetch_price_yahoo(ticker)
+        except:
+            current_prices[ticker] = positions[ticker].get("entry_price", 0)
+    
+    # Calculate total value and P&L
+    total_position_value = 0
+    total_pnl = 0
+    max_risk = 0
+    
+    for ticker, pos in positions.items():
+        current_price = current_prices.get(ticker, pos.get("entry_price", 0))
+        entry_price = pos.get("entry_price", 0)
+        quantity = pos.get("quantity", 0)
+        direction = pos.get("direction", "long")
+        stop_loss = pos.get("stop_loss", 0)
+        
+        # Position value
+        position_value = current_price * quantity
+        total_position_value += position_value
+        
+        # P&L calculation
+        if direction == "long":
+            pnl = (current_price - entry_price) * quantity
+            risk = abs((current_price - stop_loss) * quantity)
+        else:  # short
+            pnl = (entry_price - current_price) * quantity
+            risk = abs((stop_loss - current_price) * quantity)
+        
+        total_pnl += pnl
+        max_risk += risk
+    
+    total_assets = cash + total_position_value
+    
+    # Display portfolio metrics
+    st.markdown("---")
+    st.markdown("## 💰 Portfolio Monitor")
+    st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "Total Assets",
+            f"${total_assets:,.2f}",
+            f"${total_pnl:+,.2f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Cash",
+            f"${cash:,.2f}",
+            f"{(cash/total_assets*100):.1f}%"
+        )
+    
+    with col3:
+        st.metric(
+            "Positions",
+            f"${total_position_value:,.2f}",
+            f"{(total_position_value/total_assets*100):.1f}%"
+        )
+    
+    with col4:
+        st.metric(
+            "Total P&L",
+            f"${total_pnl:+,.2f}",
+            f"{(total_pnl/total_assets*100):+.2f}%"
+        )
+    
+    with col5:
+        st.metric(
+            "Max Risk",
+            f"${max_risk:,.2f}",
+            f"{(max_risk/total_assets*100):.2f}%"
+        )
+    
+    # Display positions if any
+    if positions:
+        st.markdown("### Current Positions")
+        
+        for ticker, pos in positions.items():
+            current_price = current_prices.get(ticker, pos.get("entry_price", 0))
+            entry_price = pos.get("entry_price", 0)
+            quantity = pos.get("quantity", 0)
+            direction = pos.get("direction", "long")
+            stop_loss = pos.get("stop_loss", 0)
+            take_profit = pos.get("take_profit", 0)
+            grade = pos.get("signal_grade", "N/A")
+            accuracy = pos.get("signal_accuracy", 0)
+            
+            if direction == "long":
+                pnl = (current_price - entry_price) * quantity
+                pnl_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                pnl = (entry_price - current_price) * quantity
+                pnl_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            # Color based on P&L
+            pnl_color = "green" if pnl >= 0 else "red"
+            direction_emoji = "🔴" if direction == "short" else "🟢"
+            
+            st.markdown(f"""
+            **{direction_emoji} {ticker} {direction.upper()}**
+            
+            Entry: ${entry_price:.2f} | Current: ${current_price:.2f} | 
+            P&L: <span style="color:{pnl_color}">${pnl:+,.2f} ({pnl_pct:+.2f}%)</span> |
+            Stop: ${stop_loss:.2f} | Target: ${take_profit:.2f} |
+            Grade: {grade} ⭐ | Accuracy: {accuracy:.0f}%
+            
+            ---
+            """, unsafe_allow_html=True)
+    
+    st.markdown("")
+
+
 def main():
     import streamlit as st
 
-    st.set_page_config(page_title="QuantTrade", layout="wide")
+    st.set_page_config(
+        page_title="QuantTrade", 
+        layout="wide",
+        page_icon="📊"
+    )
+    
+    # Auto-refresh every 15 minutes (900 seconds)
+    # Users can disable this in sidebar
+    if "auto_refresh" not in st.session_state:
+        st.session_state.auto_refresh = True
+    
     st.title("QuantTrade Trading Console")
     st.caption("把关键海运通道的船流数据翻译成更容易理解的交易信号。")
 
+    # Render portfolio monitor at the top
+    _render_portfolio_monitor(st)
+
     output_base = st.sidebar.text_input("Outputs Directory", "outputs")
     api_base = st.sidebar.text_input("Backend API", "http://127.0.0.1:8000")
+    
+    # Auto-refresh control
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔄 Auto Refresh")
+    auto_refresh = st.sidebar.checkbox("Enable Auto Refresh", value=st.session_state.get("auto_refresh", True))
+    refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 60, 1800, 900, 60)
+    st.session_state.auto_refresh = auto_refresh
+    st.session_state.refresh_interval = refresh_interval
+    
     use_backend = st.sidebar.checkbox("Use backend service", value=False)
     regions = list_regions()
     region_options = {region["name"]: region["id"] for region in regions}
@@ -1499,6 +1655,26 @@ def main():
             )
         for preview in paths["previews"]:
             st.write(str(preview))
+    
+    # Auto-refresh logic at the end
+    if st.session_state.get("auto_refresh", True):
+        import time
+        refresh_interval = st.session_state.get("refresh_interval", 900)
+        
+        st.markdown("---")
+        st.info(f"🔄 Auto-refreshing in {refresh_interval} seconds...")
+        
+        # Show countdown
+        countdown_placeholder = st.empty()
+        for i in range(refresh_interval, 0, -1):
+            mins, secs = divmod(i, 60)
+            countdown_placeholder.markdown(
+                f"⏱️ Refreshing in **{mins}m {secs}s**..."
+            )
+            time.sleep(1)
+        
+        # Trigger rerun
+        st.rerun()
 
 
 if __name__ == "__main__":

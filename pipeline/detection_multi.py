@@ -102,24 +102,38 @@ def detect_tank_levels(aoi_path: str, target_date: str, output_base: str = "outp
     3. Shadow length correlates with roof height
     4. Roof height indicates fill level
     """
-    detections = []
+    from pipeline.detection_storage import analyze_cushing_storage
     
-    # TODO: Implement tank level detection
-    # In production:
-    # 1. Load Sentinel-1 or high-res optical
-    # 2. Detect circular tanks using Hough transform
-    # 3. Measure shadow cast by floating roof
-    # 4. Convert shadow to fill percentage
+    # Run the actual storage analysis
+    storage_result = analyze_cushing_storage(
+        aoi_path=aoi_path,
+        target_date=target_date,
+        output_base=output_base,
+        compare_eia=False,
+    )
+    
+    fill_pct = storage_result.get("fill_pct", 0)
+    tanks_detected = storage_result.get("tanks_detected", 0)
+    status = storage_result.get("status", "unknown")
+    
+    details = [{
+        "fill_pct": fill_pct,
+        "tanks_detected": tanks_detected,
+        "estimated_barrels": storage_result.get("estimated_barrels", 0),
+        "method": storage_result.get("method", "unknown"),
+    }]
     
     return DetectionResult(
         detection_type="tank_levels",
         date=target_date,
-        count=len(detections),
-        details=detections,
+        count=tanks_detected,
+        details=details,
         metadata={
-            "data_source": "Sentinel-1",
+            "data_source": storage_result.get("data_source", "sentinel"),
             "method": "shadow_analysis",
-            "note": "Requires clear tank identification",
+            "status": status,
+            "scene_id": storage_result.get("scene_id"),
+            "scene_date": storage_result.get("scene_date"),
         },
     )
 

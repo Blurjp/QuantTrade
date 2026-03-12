@@ -55,3 +55,4 @@ vectorbt>=0.27.0
 
 # Optional: backtesting (later stage)
 # backtrader
+opencv-python-headless>=4.5.0

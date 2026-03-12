@@ -195,6 +195,36 @@ def _extract_signal_frame(region_type: str, detection: dict, region_id: str, out
     live_detection_ok = metadata.get("status", "success") == "success"
     valid_pixels = details[0].get("valid_pixels", 0) if details else 0
 
+    # Handle oil_storage type specially
+    if region_type == "oil_storage":
+        # Try to load from storage analysis file
+        storage_file = Path(output_base) / detection.get("date", "") / "storage" / "cushing_levels.json"
+        if storage_file.exists():
+            storage_data = json.loads(storage_file.read_text())
+            if storage_data.get("fill_pct") is not None:
+                row = {
+                    "date": detection.get("date"),
+                    "fill_pct": storage_data.get("fill_pct"),
+                    "tanks_detected": storage_data.get("tanks_detected", 0),
+                    "estimated_barrels": storage_data.get("estimated_barrels", 0),
+                }
+                live_frame = pd.DataFrame([row])
+        
+        # Check for backfill
+        backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
+        if backfill_file.exists():
+            history = json.loads(backfill_file.read_text())
+            stats = history.get("daily_stats") or history.get("weekly_stats") or []
+            frame = pd.DataFrame(stats)
+            if not frame.empty and 'date' in frame.columns:
+                if not live_frame.empty and 'date' in live_frame.columns:
+                    merged = pd.concat([frame, live_frame], ignore_index=True, sort=False)
+                    merged = merged.sort_values('date').drop_duplicates(subset=['date'], keep='last')
+                    return merged
+                return frame.sort_values('date')
+        
+        return live_frame
+
     if details and (region_type not in {"agriculture", "agricultural"} or (live_detection_ok and valid_pixels > 0)):
         row = dict(details[0])
         row.setdefault("date", detection.get("date"))

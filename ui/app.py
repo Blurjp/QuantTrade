@@ -840,42 +840,68 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
                 confidence = meta_sig.get("confidence", "Low")
                 signal_text = meta_sig.get("signal", "No signal")
                 instruments = ", ".join(meta_sig.get("instruments", [])) or "n/a"
+                raw_action = meta_sig.get("raw_trading_action", action)
+                pending_count = meta_sig.get("pending_count", 0)
                 
-                if action == "LONG":
+                # 关键：置信度 Low = 暂不交易，只观察
+                is_actionable = confidence in {"High", "Medium"}
+                
+                if not is_actionable:
+                    # Low confidence = 观察中，不交易
+                    action_color = "#6b5a2a"
+                    action_bg = "#f3efe3"
+                    if raw_action and raw_action != "FLAT":
+                        # 有方向倾向但不确定
+                        action_display = "观察中"
+                        action_cn = f"倾向{raw_action}，但不确定"
+                        action_hint = f"⏳ 等待确认 ({pending_count}/2)"
+                    else:
+                        action_display = "观望"
+                        action_cn = "暂无明确方向"
+                        action_hint = "不需要操作"
+                elif action == "LONG":
                     action_color = "#0d6b3c"
                     action_bg = "#dff6e8"
-                    action_cn = "做多"
+                    action_display = "做多"
+                    action_cn = "可以交易"
+                    action_hint = "✅ 确认完成，可以下单"
                 elif action == "SHORT":
                     action_color = "#9f1d1d"
                     action_bg = "#fde7e7"
-                    action_cn = "做空"
+                    action_display = "做空"
+                    action_cn = "可以交易"
+                    action_hint = "✅ 确认完成，可以下单"
                 else:
                     action_color = "#6b5a2a"
                     action_bg = "#f3efe3"
-                    action_cn = "观望"
+                    action_display = "观望"
+                    action_cn = "暂无明确方向"
+                    action_hint = "不需要操作"
                 
                 st.markdown(
                     f"""
                     <div style="background:{action_bg}; border:3px solid {action_color}; border-radius:12px; padding:16px; text-align:center;">
                         <div style="font-size:14px; color:#666; font-weight:600;">{meta_id}</div>
-                        <div style="font-size:42px; font-weight:900; color:{action_color}; margin:8px 0;">{action}</div>
+                        <div style="font-size:42px; font-weight:900; color:{action_color}; margin:8px 0;">{action_display}</div>
                         <div style="font-size:16px; color:#333;">{action_cn}</div>
-                        <div style="font-size:13px; color:#666; margin-top:8px;">置信度: {confidence}</div>
-                        <div style="font-size:13px; color:#666;">标的: {instruments}</div>
+                        <div style="font-size:13px; color:#666; margin-top:8px;">{action_hint}</div>
+                        <div style="font-size:12px; color:#888; margin-top:4px;">置信度: {confidence} | 标的: {instruments}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
                 st.caption(signal_text)
                 
-                # Fidelity instruction for this meta
-                if instruments and action != "FLAT":
+                # 只有 actionable 时才显示 Fidelity 操作指引
+                if is_actionable and instruments and action != "FLAT":
                     first_instrument = instruments.split(",")[0].strip()
                     fi = _fidelity_info(first_instrument)
                     is_short = action == "SHORT"
                     fidelity_action = fi["short_action"] if is_short else fi["long_action"]
                     beginner_note = fi["beginner_short_note"] if is_short else fi["beginner_note"]
                     st.info(f"**Fidelity 操作:** {fidelity_action}\n\n{beginner_note}")
+                elif not is_actionable and raw_action and raw_action != "FLAT":
+                    st.warning(f"⚠️ **暂不交易** — 系统正在观察这个信号，等连续确认 2 天后才会建议交易。")
     else:
         st.warning("没有 META 汇总信号")
     

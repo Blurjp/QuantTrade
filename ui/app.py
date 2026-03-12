@@ -802,8 +802,7 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         return
 
     summary_day = _resolve_summary_day(output_base, selected_day)
-    if summary_day != selected_day:
-        st.caption(f"当前区域日期 `{selected_day}` 没有全局汇总，首页排序改为使用最近一次全局汇总 `{summary_day}`。")
+    # Don't show the confusing message - just use the latest summary silently
 
     signals = summary.get("signals", {})
     if not signals:
@@ -830,7 +829,7 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
     # =========================================================================
     # ⭐ META SIGNALS - 这是你真正该看的交易结论
     # =========================================================================
-    st.markdown("### ⭐ META 汇总信号 — 这是你真正该看的交易结论")
+    st.markdown(f"### ⭐ META 汇总信号 ({summary_day}) — 这是你真正该看的交易结论")
     st.caption("系统已经把所有子区域信号汇总成这几个 META 信号。**只看这个部分就够了。**")
     
     if meta_signals:

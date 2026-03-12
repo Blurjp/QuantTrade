@@ -1022,17 +1022,42 @@ def _render_sidebar_chat(
     st.sidebar.markdown("### 💬 Ask QuantTrade")
     st.sidebar.caption(
         "Ask anything about today's signals, how to trade on Fidelity, "
-        "or what a term means. Powered by GPT-4.1 → Claude Sonnet 4.6 fallback."
+        "or what a term means. Powered by ChatGPT Plus → GPT-4.1 → Claude Sonnet 4.6."
     )
 
-    with st.sidebar.expander("API Keys (stored in session only)", expanded=False):
+    with st.sidebar.expander("🔑 Authentication (stored in session only)", expanded=False):
+        st.markdown("**Free: ChatGPT Plus (uses your subscription)**")
+        st.markdown(
+            """
+            **How to get your access token:**
+            1. Open [chat.openai.com](https://chat.openai.com) in your browser
+            2. Log in with your ChatGPT Plus account
+            3. Open DevTools (F12 or Cmd+Option+I)
+            4. Go to **Application** → **Cookies** → `chat.openai.com`
+            5. Copy the value of `__Secure-next-auth.session-token`
+            6. Paste it below
+            """
+        )
+        chatgpt_token = st.text_input(
+            "ChatGPT Session Token",
+            type="password",
+            key="chat_chatgpt_token",
+            help="Free — uses your ChatGPT Plus subscription. Token expires periodically; re-copy when needed.",
+        )
+        
+        st.markdown("---")
+        st.markdown("**Paid fallbacks (optional):**")
         openai_key = st.text_input(
-            "OpenAI API Key", type="password", key="chat_openai_key",
-            help="Required for GPT-4.1 (primary). Leave blank to use env OPENAI_API_KEY.",
+            "OpenAI API Key",
+            type="password",
+            key="chat_openai_key",
+            help="Required for GPT-4.1 API fallback. Leave blank to use env OPENAI_API_KEY.",
         )
         anthropic_key = st.text_input(
-            "Anthropic API Key", type="password", key="chat_anthropic_key",
-            help="Required for Claude Sonnet 4.6 (fallback). Leave blank to use env ANTHROPIC_API_KEY.",
+            "Anthropic API Key",
+            type="password",
+            key="chat_anthropic_key",
+            help="Required for Claude Sonnet 4.6 fallback. Leave blank to use env ANTHROPIC_API_KEY.",
         )
 
     # Initialise session state
@@ -1082,6 +1107,7 @@ def _render_sidebar_chat(
                 reply = ask(
                     messages=st.session_state.chat_messages,
                     system_prompt=st.session_state.chat_system_prompt,
+                    chatgpt_access_token=chatgpt_token or None,
                     openai_api_key=openai_key or None,
                     anthropic_api_key=anthropic_key or None,
                 )

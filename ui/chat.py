@@ -3,28 +3,37 @@ QuantTrade chat backend.
 
 Provides:
   - build_system_prompt()  — assembles page context into a system message
-  - ask()                  — calls GPT-4.1 with Claude Sonnet 4.6 as fallback
+  - ask()                  — calls ChatGPT Plus (web) → GPT-4.1 API → Claude Sonnet 4.6 fallback
 
-Environment variables required (at least one pair):
-  OPENAI_API_KEY    — for GPT-4.1 (primary)
-  ANTHROPIC_API_KEY — for Claude Sonnet 4.6 (fallback)
+Authentication options (at least one required):
+  1. ChatGPT Plus access token (free, uses your subscription)
+  2. OPENAI_API_KEY    — for GPT-4.1 API (paid)
+  3. ANTHROPIC_API_KEY — for Claude Sonnet 4.6 (paid fallback)
 
 Models used:
-  Primary  : gpt-4.1           (OpenAI)
-  Fallback : claude-sonnet-4-6 (Anthropic)
+  Primary  : ChatGPT Plus (gpt-4o / gpt-4.1 via web backend)
+  Fallback : gpt-4.1 (OpenAI API) → claude-sonnet-4-6 (Anthropic)
 """
 
 from __future__ import annotations
 
 import json
 import os
+import uuid
 from typing import Dict, List, Optional
+
+import requests
 
 # ---------------------------------------------------------------------------
 # Model identifiers
 # ---------------------------------------------------------------------------
+CHATGPT_WEB_MODEL = "gpt-4o"
 OPENAI_MODEL = "gpt-4.1"
 ANTHROPIC_MODEL = "claude-sonnet-4-6"
+
+# ChatGPT web API endpoints
+CHATGPT_SESSION_URL = "https://chat.openai.com/api/auth/session"
+CHATGPT_CONVERSATION_URL = "https://chat.openai.com/backend-api/conversation"
 
 # Maximum tokens to spend on the injected context block
 _MAX_CONTEXT_CHARS = 12_000
@@ -107,12 +116,136 @@ def build_system_prompt(
 
 
 # ---------------------------------------------------------------------------
-# LLM call — GPT-4.1 primary, Claude Sonnet 4.6 fallback
+# ChatGPT Plus (web) backend — uses your subscription, no API key needed
+# ---------------------------------------------------------------------------
+
+def get_chatgpt_access_token(session_token: str) -> Optional[str]:
+    """
+    Exchange a ChatGPT session token (__Secure-next-auth.session-token cookie)
+    for an access token by calling the session endpoint.
+    
+    Returns the access token string, or None on failure.
+    """
+    try:
+        cookies = {"__Secure-next-auth.session-token": session_token}
+        resp = requests.get(CHATGPT_SESSION_URL, cookies=cookies, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("accessToken")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def ask_chatgpt_web(
+    messages: List[Dict[str, str]],
+    system_prompt: str,
+    access_token: str,
+    model: str = CHATGPT_WEB_MODEL,
+) -> Dict[str, str]:
+    """
+    Send a conversation to ChatGPT web backend using an OAuth access token.
+    
+    This uses your ChatGPT Plus subscription — no API costs.
+    
+    Args:
+        messages: Conversation history [{"role": "user/assistant", "content": "..."}]
+        system_prompt: System context injected at the start
+        access_token: OAuth access token from ChatGPT session
+        model: Model to use (gpt-4o, gpt-4, etc.)
+    
+    Returns:
+        {"role": "assistant", "content": "<reply>", "model": "<model>"}
+    """
+    conversation_id = str(uuid.uuid4())
+    parent_message_id = str(uuid.uuid4())
+    
+    # Build the message content: system prompt + conversation
+    formatted_parts = [f"[System Instructions]\n{system_prompt}\n"]
+    for msg in messages:
+        role = msg["role"].upper()
+        content = msg["content"]
+        formatted_parts.append(f"[{role}]\n{content}\n")
+    
+    user_content = "\n".join(formatted_parts)
+    
+    payload = {
+        "action": "next",
+        "messages": [
+            {
+                "id": str(uuid.uuid4()),
+                "author": {"role": "user"},
+                "content": {"content_type": "text", "parts": [user_content]},
+                "metadata": {},
+            }
+        ],
+        "conversation_id": None,
+        "parent_message_id": parent_message_id,
+        "model": model,
+        "timezone_offset_min": -480,
+        "suggestions": [],
+        "history_and_training_disabled": False,
+        "conversation_mode": {"kind": "primary_assistant"},
+        "force_paragen": False,
+        "force_rate_limit": False,
+    }
+    
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    }
+    
+    try:
+        resp = requests.post(
+            CHATGPT_CONVERSATION_URL,
+            headers=headers,
+            json=payload,
+            stream=True,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        
+        # Parse SSE stream — look for the final [DONE] message with content
+        content = ""
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            if line.startswith("data: "):
+                data_str = line[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    data = json.loads(data_str)
+                    message = data.get("message", {})
+                    if message.get("author", {}).get("role") == "assistant":
+                        content_parts = message.get("content", {}).get("parts", [])
+                        if content_parts:
+                            content = content_parts[0]
+                except json.JSONDecodeError:
+                    continue
+        
+        if not content:
+            content = "(No response from ChatGPT)"
+        
+        return {"role": "assistant", "content": content, "model": f"chatgpt-web/{model}"}
+    
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "role": "assistant",
+            "content": f"ChatGPT web error: {exc}\n\nYour access token may have expired. Refresh it from the browser.",
+            "model": "error",
+        }
+
+
+# ---------------------------------------------------------------------------
+# LLM call — ChatGPT Plus → GPT-4.1 API → Claude Sonnet 4.6 fallback
 # ---------------------------------------------------------------------------
 
 def ask(
     messages: List[Dict[str, str]],
     system_prompt: str,
+    chatgpt_access_token: Optional[str] = None,
     openai_api_key: Optional[str] = None,
     anthropic_api_key: Optional[str] = None,
 ) -> Dict[str, str]:
@@ -123,14 +256,29 @@ def ask(
     `messages` is the full history list:
       [{"role": "user"|"assistant", "content": "..."}, ...]
 
-    Tries GPT-4.1 first; falls back to Claude Sonnet 4.6 on any error.
+    Priority:
+      1. ChatGPT Plus (web) — uses your subscription, free
+      2. GPT-4.1 API — requires OPENAI_API_KEY
+      3. Claude Sonnet 4.6 — requires ANTHROPIC_API_KEY
     """
+    chatgpt_token = chatgpt_access_token or os.getenv("CHATGPT_ACCESS_TOKEN", "")
     oai_key = openai_api_key or os.getenv("OPENAI_API_KEY", "")
     ant_key = anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
 
     last_error: Optional[Exception] = None
 
-    # -- Primary: OpenAI GPT-4.1 --
+    # -- Primary: ChatGPT Plus (web) — free, uses subscription --
+    if chatgpt_token:
+        try:
+            return ask_chatgpt_web(
+                messages=messages,
+                system_prompt=system_prompt,
+                access_token=chatgpt_token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+    # -- Fallback 1: OpenAI GPT-4.1 API --
     if oai_key:
         try:
             from openai import OpenAI  # type: ignore
@@ -147,7 +295,7 @@ def ask(
         except Exception as exc:  # noqa: BLE001
             last_error = exc
 
-    # -- Fallback: Anthropic Claude Sonnet 4.6 --
+    # -- Fallback 2: Anthropic Claude Sonnet 4.6 --
     if ant_key:
         try:
             import anthropic as _anthropic  # type: ignore
@@ -167,13 +315,13 @@ def ask(
         except Exception as exc:  # noqa: BLE001
             last_error = exc
 
-    # -- No keys configured --
+    # -- No auth configured --
     if last_error:
         return {
             "role": "assistant",
             "content": (
                 f"LLM call failed: {last_error}\n\n"
-                "Please set OPENAI_API_KEY or ANTHROPIC_API_KEY."
+                "Please provide a ChatGPT access token, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
             ),
             "model": "error",
         }
@@ -181,9 +329,12 @@ def ask(
     return {
         "role": "assistant",
         "content": (
-            "No LLM API key configured. "
-            "Set OPENAI_API_KEY (for GPT-4.1) or ANTHROPIC_API_KEY (for Claude Sonnet 4.6) "
-            "in your environment or the sidebar."
+            "No LLM authentication configured.\n\n"
+            "**Free option:** Log into ChatGPT in your browser, then:\n"
+            "1. Open DevTools (F12) → Application → Cookies → chat.openai.com\n"
+            "2. Copy the value of `__Secure-next-auth.session-token`\n"
+            "3. Paste it in the 'ChatGPT Access Token' field below\n\n"
+            "Or use paid APIs: OPENAI_API_KEY or ANTHROPIC_API_KEY."
         ),
         "model": "none",
     }

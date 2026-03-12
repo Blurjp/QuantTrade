@@ -810,6 +810,10 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         st.info("当天没有可用信号。")
         return
 
+    # Separate META signals from sub-regions
+    meta_signals = [(rid, sig) for rid, sig in signals.items() if rid.endswith("_meta")]
+    sub_signals = [(rid, sig) for rid, sig in signals.items() if not rid.endswith("_meta")]
+    
     ranked = sorted(signals.items(), key=lambda item: _signal_rank(item[1]))
     actionable = [(region_id, signal) for region_id, signal in ranked if signal.get("actionability") == "Actionable"]
     pending = [
@@ -823,6 +827,64 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         if region_id.endswith("_meta") and signal.get("trading_action") == "FLAT"
     ]
 
+    # =========================================================================
+    # ⭐ META SIGNALS - 这是你真正该看的交易结论
+    # =========================================================================
+    st.markdown("### ⭐ META 汇总信号 — 这是你真正该看的交易结论")
+    st.caption("系统已经把所有子区域信号汇总成这几个 META 信号。**只看这个部分就够了。**")
+    
+    if meta_signals:
+        meta_cols = st.columns(len(meta_signals))
+        for idx, (meta_id, meta_sig) in enumerate(sorted(meta_signals, key=lambda x: x[0])):
+            with meta_cols[idx]:
+                action = meta_sig.get("trading_action", "FLAT")
+                confidence = meta_sig.get("confidence", "Low")
+                signal_text = meta_sig.get("signal", "No signal")
+                instruments = ", ".join(meta_sig.get("instruments", [])) or "n/a"
+                
+                if action == "LONG":
+                    action_color = "#0d6b3c"
+                    action_bg = "#dff6e8"
+                    action_cn = "做多"
+                elif action == "SHORT":
+                    action_color = "#9f1d1d"
+                    action_bg = "#fde7e7"
+                    action_cn = "做空"
+                else:
+                    action_color = "#6b5a2a"
+                    action_bg = "#f3efe3"
+                    action_cn = "观望"
+                
+                st.markdown(
+                    f"""
+                    <div style="background:{action_bg}; border:3px solid {action_color}; border-radius:12px; padding:16px; text-align:center;">
+                        <div style="font-size:14px; color:#666; font-weight:600;">{meta_id}</div>
+                        <div style="font-size:42px; font-weight:900; color:{action_color}; margin:8px 0;">{action}</div>
+                        <div style="font-size:16px; color:#333;">{action_cn}</div>
+                        <div style="font-size:13px; color:#666; margin-top:8px;">置信度: {confidence}</div>
+                        <div style="font-size:13px; color:#666;">标的: {instruments}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.caption(signal_text)
+                
+                # Fidelity instruction for this meta
+                if instruments and action != "FLAT":
+                    first_instrument = instruments.split(",")[0].strip()
+                    fi = _fidelity_info(first_instrument)
+                    is_short = action == "SHORT"
+                    fidelity_action = fi["short_action"] if is_short else fi["long_action"]
+                    beginner_note = fi["beginner_short_note"] if is_short else fi["beginner_note"]
+                    st.info(f"**Fidelity 操作:** {fidelity_action}\n\n{beginner_note}")
+    else:
+        st.warning("没有 META 汇总信号")
+    
+    st.markdown("---")
+    st.markdown("### 📊 以下是研究参考（你不需要看这个）")
+    st.caption("下面是各个子区域的原始信号，仅供研究参考。**交易时只看上面的 META 信号。**")
+    
+    # Continue with the rest of the original logic
     instrument_rows = _build_instrument_rankings(ranked)
     verdict = _overall_daily_verdict(actionable, instrument_rows)
     beginner_guide = _beginner_verdict_guide(verdict, actionable, instrument_rows)

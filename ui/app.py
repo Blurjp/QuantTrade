@@ -1035,7 +1035,7 @@ def _render_sidebar_chat(
         
         st.markdown(
             """
-            <a href="https://chat.openai.com" target="_blank" style="
+            <a href="https://chatgpt.com" target="_blank" style="
                 display: inline-block;
                 background: #10a37f;
                 color: white;
@@ -1061,12 +1061,13 @@ def _render_sidebar_chat(
                 
                 **Step 3:** Go to the **Application** tab (or **Storage** in some browsers)
                 
-                **Step 4:** In the left sidebar, expand **Cookies** → click on `https://chat.openai.com`
+                **Step 4:** In the left sidebar, expand **Cookies** → click on `https://chatgpt.com`
                 
                 **Step 5:** Find the cookie named:
                 ```
                 __Secure-next-auth.session-token
                 ```
+                (or just `next-auth.session-token` on some browsers)
                 
                 **Step 6:** Double-click the **Value** column to select it, then copy (Cmd+C / Ctrl+C)
                 

@@ -31,9 +31,9 @@ CHATGPT_WEB_MODEL = "gpt-4o"
 OPENAI_MODEL = "gpt-4.1"
 ANTHROPIC_MODEL = "claude-sonnet-4-6"
 
-# ChatGPT web API endpoints
-CHATGPT_SESSION_URL = "https://chat.openai.com/api/auth/session"
-CHATGPT_CONVERSATION_URL = "https://chat.openai.com/backend-api/conversation"
+# ChatGPT web API endpoints (new domain)
+CHATGPT_SESSION_URL = "https://chatgpt.com/api/auth/session"
+CHATGPT_CONVERSATION_URL = "https://chatgpt.com/backend-api/conversation"
 
 # Maximum tokens to spend on the injected context block
 _MAX_CONTEXT_CHARS = 12_000
@@ -119,21 +119,38 @@ def build_system_prompt(
 # ChatGPT Plus (web) backend — uses your subscription, no API key needed
 # ---------------------------------------------------------------------------
 
+# Cookie names for different domains
+CHATGPT_COOKIE_NAMES = [
+    "__Secure-next-auth.session-token",  # Primary cookie name
+    "next-auth.session-token",  # Fallback without Secure prefix
+]
+
+
 def get_chatgpt_access_token(session_token: str) -> Optional[str]:
     """
-    Exchange a ChatGPT session token (__Secure-next-auth.session-token cookie)
-    for an access token by calling the session endpoint.
+    Exchange a ChatGPT session token (cookie value) for an access token.
     
     Returns the access token string, or None on failure.
     """
-    try:
-        cookies = {"__Secure-next-auth.session-token": session_token}
-        resp = requests.get(CHATGPT_SESSION_URL, cookies=cookies, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("accessToken")
-    except Exception:  # noqa: BLE001
-        return None
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+    
+    # Try different cookie names
+    for cookie_name in CHATGPT_COOKIE_NAMES:
+        try:
+            cookies = {cookie_name: session_token}
+            resp = requests.get(CHATGPT_SESSION_URL, cookies=cookies, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                token = data.get("accessToken")
+                if token:
+                    return token
+        except Exception:  # noqa: BLE001
+            continue
+    
+    return None
 
 
 def ask_chatgpt_web(
@@ -146,17 +163,7 @@ def ask_chatgpt_web(
     Send a conversation to ChatGPT web backend using an OAuth access token.
     
     This uses your ChatGPT Plus subscription — no API costs.
-    
-    Args:
-        messages: Conversation history [{"role": "user/assistant", "content": "..."}]
-        system_prompt: System context injected at the start
-        access_token: OAuth access token from ChatGPT session
-        model: Model to use (gpt-4o, gpt-4, etc.)
-    
-    Returns:
-        {"role": "assistant", "content": "<reply>", "model": "<model>"}
     """
-    conversation_id = str(uuid.uuid4())
     parent_message_id = str(uuid.uuid4())
     
     # Build the message content: system prompt + conversation
@@ -193,7 +200,9 @@ def ask_chatgpt_web(
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Origin": "https://chatgpt.com",
+        "Referer": "https://chatgpt.com/",
     }
     
     try:
@@ -230,10 +239,34 @@ def ask_chatgpt_web(
         
         return {"role": "assistant", "content": content, "model": f"chatgpt-web/{model}"}
     
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response else "unknown"
+        if status == 403:
+            return {
+                "role": "assistant",
+                "content": (
+                    f"ChatGPT web returned 403 Forbidden.\n\n"
+                    "**This usually means:**\n"
+                    "1. Your session token has expired — get a fresh one from chatgpt.com\n"
+                    "2. You need to complete a CAPTCHA in the browser first\n"
+                    "3. Your IP is being rate-limited\n\n"
+                    "**To fix:**\n"
+                    "- Go to chatgpt.com in your browser\n"
+                    "- Make sure you can send a message there successfully\n"
+                    "- Then get a fresh cookie value and try again\n\n"
+                    "**Alternative:** Use OpenAI API key (paid) as fallback."
+                ),
+                "model": "error",
+            }
+        return {
+            "role": "assistant",
+            "content": f"ChatGPT web HTTP error {status}: {exc}\n\nTry refreshing your session token.",
+            "model": "error",
+        }
     except Exception as exc:  # noqa: BLE001
         return {
             "role": "assistant",
-            "content": f"ChatGPT web error: {exc}\n\nYour access token may have expired. Refresh it from the browser.",
+            "content": f"ChatGPT web error: {exc}\n\nYour access token may have expired. Refresh it from chatgpt.com.",
             "model": "error",
         }
 

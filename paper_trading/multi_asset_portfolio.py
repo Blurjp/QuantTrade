@@ -26,6 +26,8 @@ class Position:
     stop_loss: float = 0
     take_profit: float = 0
     unrealized_pnl: float = 0
+    signal_accuracy: float = 0
+    signal_grade: str = ""
 
 
 @dataclass

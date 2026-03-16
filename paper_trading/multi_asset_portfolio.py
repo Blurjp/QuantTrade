@@ -146,6 +146,8 @@ class MultiAssetPortfolio:
                     "stop_loss": pos.stop_loss,
                     "take_profit": pos.take_profit,
                     "unrealized_pnl": pos.unrealized_pnl,
+                    "signal_accuracy": pos.signal_accuracy,
+                    "signal_grade": pos.signal_grade,
                 }
                 for ticker, pos in self.positions.items()
             },

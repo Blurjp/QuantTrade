@@ -3,7 +3,7 @@ import json
 import pandas as pd
 
 from pipeline.backtest import generate_historical_signals, optimize_thresholds
-from pipeline.signals_multi import generate_signal
+from pipeline.signals import generate_signal
 
 
 def test_agriculture_signal_uses_seasonal_baseline():
@@ -88,3 +88,18 @@ def test_optimize_thresholds_applies_thresholds(tmp_path, monkeypatch):
 
     assert accuracies[0.02] != accuracies[0.05]
     assert result["optimal_threshold"] in accuracies
+
+
+def test_auto_inventory_signal_accepts_ndvi_proxy_history():
+    data = pd.DataFrame([
+        {"date": "2026-01-15", "ndvi_mean": 0.08},
+        {"date": "2026-02-12", "ndvi_mean": 0.09},
+        {"date": "2026-03-05", "ndvi_mean": 0.11},
+        {"date": "2026-03-12", "ndvi_mean": 0.14},
+    ])
+
+    signal = generate_signal("auto_inventory", data)
+
+    assert signal["trading_action"] == "SHORT"
+    assert signal["inventory_source"] == "optical inventory proxy"
+    assert signal["baseline_samples"] >= 3

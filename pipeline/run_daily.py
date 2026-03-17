@@ -12,8 +12,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from pipeline.regions import get_active_regions, load_registry
-from pipeline.detection_multi import run_detection
-from pipeline.signals_multi import generate_signal
+from pipeline.detection_dispatcher import run_detection
+from pipeline.signals import generate_signal
 from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
 
 
@@ -164,6 +164,9 @@ def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, p
         else:
             confidence = "Low"
 
+        if confidence == "Low":
+            actionability = "Ignore"
+
         raw_signal = {
             "signal": _meta_signal_text(group_config, raw_action),
             "confidence": confidence,
@@ -197,20 +200,11 @@ def _extract_signal_frame(region_type: str, detection: dict, region_id: str, out
 
     # Handle oil_storage type specially
     if region_type == "oil_storage":
-        # Try to load from storage analysis file
-        storage_file = Path(output_base) / detection.get("date", "") / "storage" / "cushing_levels.json"
-        if storage_file.exists():
-            storage_data = json.loads(storage_file.read_text())
-            if storage_data.get("fill_pct") is not None:
-                row = {
-                    "date": detection.get("date"),
-                    "fill_pct": storage_data.get("fill_pct"),
-                    "tanks_detected": storage_data.get("tanks_detected", 0),
-                    "estimated_barrels": storage_data.get("estimated_barrels", 0),
-                }
-                live_frame = pd.DataFrame([row])
-        
-        # Check for backfill
+        if details and metadata.get("status") == "success":
+            row = dict(details[0])
+            row.setdefault("date", detection.get("date"))
+            live_frame = pd.DataFrame([row])
+
         backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
         if backfill_file.exists():
             history = json.loads(backfill_file.read_text())
@@ -400,22 +394,28 @@ def run_daily_pipeline(
 
         status = "✅" if result["status"] == "success" else "❌"
         print(f"  Status: {status} {result['status']}")
-    
-    # Save summary
-    meta_signals, meta_state = build_meta_signals(signals, active_regions, meta_groups, persistence_state)
-    signals.update(meta_signals)
-    next_persistence_state.update(meta_state)
-    save_persistence_state(output_base, next_persistence_state)
 
+    meta_signals, next_meta_state = build_meta_signals(
+        signals,
+        active_regions,
+        meta_groups,
+        persistence_state,
+    )
+    signals.update(meta_signals)
+    next_persistence_state.update(next_meta_state)
+    save_persistence_state(output_base, next_persistence_state)
+    
+    # Build summary
     summary = {
         "date": target_date,
         "regions_processed": len(results),
-        "regions_successful": len([r for r in results if r["status"] == "success"]),
-        "results": results,
+        "regions_successful": sum(1 for r in results if r["status"] == "success"),
+        "regions_failed": sum(1 for r in results if r["status"] != "success"),
         "signals": signals,
-        "generated_at": datetime.now().isoformat(),
+        "results": results,
     }
     
+    # Save summary
     output_path = Path(output_base) / target_date
     output_path.mkdir(parents=True, exist_ok=True)
     
@@ -424,8 +424,18 @@ def run_daily_pipeline(
     
     print(f"\n{'=' * 60}")
     print(f"Summary saved to: {summary_file}")
-    print(f"Regions processed: {len(results)}")
+    print(f"Regions processed: {summary['regions_processed']}")
     print(f"Successful: {summary['regions_successful']}")
+    
+    # Track total assets for equity curve using mark-to-market valuation
+    from pipeline.asset_tracker import record_daily_assets
+    from pipeline.price_feed import get_prices_for_portfolio
+
+    portfolio = MultiAssetPortfolio(output_base=output_base)
+    prices = get_prices_for_portfolio(portfolio)
+    total_value = portfolio.get_total_value(prices)
+
+    record_daily_assets(total_value, target_date, output_base=output_base)
     
     return summary
 

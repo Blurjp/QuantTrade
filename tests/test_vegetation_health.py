@@ -85,7 +85,16 @@ class TestVegetationHealthMonitor:
 
     def test_calculate_baseline(self, monitor):
         """Test baseline calculation."""
-        baseline = monitor.calculate_baseline("usa_corn_soybeans", days=5)
+        # Mock fetch_ndvi_data to avoid slow network calls
+        mock_data = {
+            "ndvi": 0.65,
+            "evi": 0.55,
+            "ndvi_anomaly_pct": 0.0,
+            "quality": "good",
+        }
+
+        with patch.object(monitor, 'fetch_ndvi_data', return_value=mock_data):
+            baseline = monitor.calculate_baseline("usa_corn_soybeans", days=5)
 
         assert "ndvi" in baseline
         assert "evi" in baseline
@@ -126,7 +135,32 @@ class TestVegetationHealthMonitor:
 
     def test_generate_signal(self, monitor):
         """Test signal generation."""
-        signal = monitor.generate_signal("usa_corn_soybeans", "2026-03-15")
+        # Mock fetch_ndvi_data and calculate_baseline to avoid slow operations
+        mock_data = {
+            "ndvi": 0.65,
+            "evi": 0.55,
+            "ndvi_anomaly_pct": 0.0,
+            "status": "normal",
+            "is_critical_season": True,
+            "impact_score": 10.0,
+            "quality": "good",
+            "lai_estimate": 3.9,
+            "chlorophyll_content": 65.0,
+            "region_id": "usa_corn_soybeans",
+            "region_name": "US Corn & Soybeans Belt",
+            "region_type": "row_crops",
+            "country": "USA",
+            "date": "2026-03-15",
+        }
+        mock_baseline = {
+            "ndvi": {"mean": 0.65, "std": 0.05},
+            "evi": {"mean": 0.55, "std": 0.04},
+            "anomaly": {"mean": 0.0, "std": 0.1},
+        }
+
+        with patch.object(monitor, 'fetch_ndvi_data', return_value=mock_data):
+            with patch.object(monitor, 'calculate_baseline', return_value=mock_baseline):
+                signal = monitor.generate_signal("usa_corn_soybeans", "2026-03-15")
 
         assert signal is not None
         assert "direction" in signal
@@ -135,7 +169,32 @@ class TestVegetationHealthMonitor:
 
     def test_generate_signal_saves_file(self, monitor, tmp_path):
         """Test that signal generation saves output file."""
-        signal = monitor.generate_signal("usa_corn_soybeans", "2026-03-15")
+        # Mock fetch_ndvi_data and calculate_baseline to avoid slow operations
+        mock_data = {
+            "ndvi": 0.65,
+            "evi": 0.55,
+            "ndvi_anomaly_pct": 0.0,
+            "status": "normal",
+            "is_critical_season": True,
+            "impact_score": 10.0,
+            "quality": "good",
+            "lai_estimate": 3.9,
+            "chlorophyll_content": 65.0,
+            "region_id": "usa_corn_soybeans",
+            "region_name": "US Corn & Soybeans Belt",
+            "region_type": "row_crops",
+            "country": "USA",
+            "date": "2026-03-15",
+        }
+        mock_baseline = {
+            "ndvi": {"mean": 0.65, "std": 0.05},
+            "evi": {"mean": 0.55, "std": 0.04},
+            "anomaly": {"mean": 0.0, "std": 0.1},
+        }
+
+        with patch.object(monitor, 'fetch_ndvi_data', return_value=mock_data):
+            with patch.object(monitor, 'calculate_baseline', return_value=mock_baseline):
+                signal = monitor.generate_signal("usa_corn_soybeans", "2026-03-15")
 
         signal_file = tmp_path / "vegetation_health" / "signal_usa_corn_soybeans_2026-03-15.json"
         assert signal_file.exists()
@@ -146,7 +205,20 @@ class TestVegetationHealthMonitor:
 
     def test_generate_all_signals(self, monitor):
         """Test generating signals for all regions."""
-        signals = monitor.generate_all_signals("2026-03-15")
+        # Mock generate_signal to avoid slow operations
+        mock_signal = {
+            "region_id": "usa_corn_soybeans",
+            "region_name": "US Corn & Soybeans Belt",
+            "region_type": "row_crops",
+            "direction": "neutral",
+            "confidence": 50.0,
+            "impact_score": 10.0,
+            "status": "normal",
+            "is_critical_season": True,
+        }
+
+        with patch.object(monitor, 'generate_signal', return_value=mock_signal):
+            signals = monitor.generate_all_signals("2026-03-15")
 
         assert isinstance(signals, list)
         assert len(signals) <= len(monitor.regions)  # Some may fail

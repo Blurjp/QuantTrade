@@ -81,7 +81,15 @@ class TestSeaSurfaceTemperatureMonitor:
 
     def test_calculate_baseline(self, monitor):
         """Test baseline calculation."""
-        baseline = monitor.calculate_baseline("nino34", days=10)
+        # Mock fetch_sst_data to avoid slow network calls
+        mock_data = {
+            "sst_celsius": 28.0,
+            "sst_anomaly": 0.0,
+            "quality": "good",
+        }
+
+        with patch.object(monitor, 'fetch_sst_data', return_value=mock_data):
+            baseline = monitor.calculate_baseline("nino34", days=10)
 
         assert "sst" in baseline
         assert "anomaly" in baseline
@@ -105,7 +113,28 @@ class TestSeaSurfaceTemperatureMonitor:
 
     def test_generate_signal(self, monitor):
         """Test signal generation."""
-        signal = monitor.generate_signal("nino34", "2026-03-15")
+        # Mock fetch_sst_data and calculate_baseline to avoid slow operations
+        mock_data = {
+            "sst_celsius": 28.0,
+            "sst_anomaly": 0.0,
+            "baseline_sst": 27.5,
+            "enso_state": "neutral",
+            "quality": "good",
+            "impact": "neutral",
+            "region_id": "nino34",
+            "region_name": "Niño 3.4 Region",
+            "region_type": "enso_indicator",
+            "ocean": "Pacific",
+            "date": "2026-03-15",
+        }
+        mock_baseline = {
+            "sst": {"mean": 27.5, "std": 0.5},
+            "anomaly": {"mean": 0.0, "std": 0.3},
+        }
+
+        with patch.object(monitor, 'fetch_sst_data', return_value=mock_data):
+            with patch.object(monitor, 'calculate_baseline', return_value=mock_baseline):
+                signal = monitor.generate_signal("nino34", "2026-03-15")
 
         assert signal is not None
         assert "direction" in signal
@@ -114,7 +143,28 @@ class TestSeaSurfaceTemperatureMonitor:
 
     def test_generate_signal_saves_file(self, monitor, tmp_path):
         """Test that signal generation saves output file."""
-        signal = monitor.generate_signal("nino34", "2026-03-15")
+        # Mock fetch_sst_data and calculate_baseline to avoid slow operations
+        mock_data = {
+            "sst_celsius": 28.0,
+            "sst_anomaly": 0.0,
+            "baseline_sst": 27.5,
+            "enso_state": "neutral",
+            "quality": "good",
+            "impact": "neutral",
+            "region_id": "nino34",
+            "region_name": "Niño 3.4 Region",
+            "region_type": "enso_indicator",
+            "ocean": "Pacific",
+            "date": "2026-03-15",
+        }
+        mock_baseline = {
+            "sst": {"mean": 27.5, "std": 0.5},
+            "anomaly": {"mean": 0.0, "std": 0.3},
+        }
+
+        with patch.object(monitor, 'fetch_sst_data', return_value=mock_data):
+            with patch.object(monitor, 'calculate_baseline', return_value=mock_baseline):
+                signal = monitor.generate_signal("nino34", "2026-03-15")
 
         signal_file = tmp_path / "sea_surface_temperature" / "signal_nino34_2026-03-15.json"
         assert signal_file.exists()
@@ -125,7 +175,18 @@ class TestSeaSurfaceTemperatureMonitor:
 
     def test_generate_all_signals(self, monitor):
         """Test generating signals for all regions."""
-        signals = monitor.generate_all_signals("2026-03-15")
+        # Mock generate_signal to avoid slow operations
+        mock_signal = {
+            "region_id": "nino34",
+            "region_name": "Niño 3.4 Region",
+            "region_type": "enso_indicator",
+            "direction": "neutral",
+            "confidence": 50.0,
+            "enso_state": "neutral",
+        }
+
+        with patch.object(monitor, 'generate_signal', return_value=mock_signal):
+            signals = monitor.generate_all_signals("2026-03-15")
 
         assert isinstance(signals, list)
         assert len(signals) <= len(monitor.regions)  # Some may fail

@@ -96,7 +96,19 @@ class TestPrecipitationMonitor:
 
     def test_calculate_baseline(self, monitor):
         """Test baseline calculation."""
-        baseline = monitor.calculate_baseline("usa_corn_belt", days=10)
+        # Mock fetch_precipitation_data to avoid slow network calls
+        mock_data = {
+            "daily_precip_mm": 3.0,
+            "monthly_precip_estimate_mm": 85.0,
+            "baseline_precip_mm": 85.0,
+            "precip_anomaly_mm": 0.0,
+            "precip_anomaly_pct": 0.0,
+            "status": "normal",
+            "quality": "good",
+        }
+
+        with patch.object(monitor, 'fetch_precipitation_data', return_value=mock_data):
+            baseline = monitor.calculate_baseline("usa_corn_belt", days=10)
 
         assert "precipitation" in baseline
         assert "anomaly" in baseline

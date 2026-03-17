@@ -13,6 +13,7 @@ Data Sources:
 
 import json
 import logging
+import os
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,18 @@ import numpy as np
 import pandas as pd
 from functools import lru_cache
 import time
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env from the project root
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        logging.info(f"Loaded environment variables from {env_path}")
+except ImportError:
+    # python-dotenv not installed, use system environment variables
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +57,34 @@ class SatelliteDataClient:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_hours = cache_hours
         
+        # Load credentials from environment variables
+        self.nasa_username = os.getenv("NASA_EARTHDATA_USERNAME")
+        self.nasa_password = os.getenv("NASA_EARTHDATA_PASSWORD")
+        self.pc_key = os.getenv("PC_SDK_SUBSCRIPTION_KEY")
+        self.copernicus_username = os.getenv("COPERNICUS_USERNAME")
+        self.copernicus_password = os.getenv("COPERNICUS_PASSWORD")
+        self.noaa_token = os.getenv("NOAA_TOKEN")
+        
+        # Check which APIs are available
+        self.nasa_available = bool(self.nasa_username and self.nasa_password)
+        self.pc_available = bool(self.pc_key)
+        self.copernicus_available = bool(self.copernicus_username and self.copernicus_password)
+        self.noaa_available = bool(self.noaa_token)
+        
+        if self.nasa_available:
+            logger.info("✅ NASA Earthdata credentials found")
+        else:
+            logger.warning("⚠️ NASA Earthdata credentials not found - using fallback data")
+        
+        if self.pc_available:
+            logger.info("✅ Planetary Computer API key found")
+        
+        if self.copernicus_available:
+            logger.info("✅ Copernicus credentials found")
+        
+        if self.noaa_available:
+            logger.info("✅ NOAA token found")
+        
         # API endpoints
         self.planetary_computer_url = "https://planetarycomputer.microsoft.com/api/stac/v1"
         self.nasa_ges_disc_url = "https://disc.gsfc.nasa.gov/api"
@@ -52,6 +93,11 @@ class SatelliteDataClient:
         # Rate limiting
         self.last_request_time = {}
         self.min_request_interval = 1.0  # seconds
+        
+        # Session for authenticated requests
+        self.session = requests.Session()
+        if self.nasa_available:
+            self.session.auth = (self.nasa_username, self.nasa_password)
     
     def _rate_limit(self, api_name: str):
         """Apply rate limiting for API requests."""
@@ -537,25 +583,50 @@ def main():
     print("\n🛰️ Testing Satellite Data Client")
     print("=" * 60)
     
+    # Show API availability
+    print("\n📡 API Availability:")
+    print(f"  NASA Earthdata: {'✅ Available' if client.nasa_available else '❌ Not configured'}")
+    print(f"  Planetary Computer: {'✅ Available' if client.pc_available else '❌ Not configured'}")
+    print(f"  Copernicus: {'✅ Available' if client.copernicus_available else '❌ Not configured'}")
+    print(f"  NOAA: {'✅ Available' if client.noaa_available else '❌ Not configured'}")
+    
+    if not any([client.nasa_available, client.pc_available, client.copernicus_available, client.noaa_available]):
+        print("\n⚠️  No API credentials found. Using fallback calculated estimates.")
+        print("   To use real data, configure credentials in .env file.")
+    
+    print("\n📊 Testing Data Retrieval:")
+    
     # Test NDVI
     print("\n1. MODIS NDVI:")
     ndvi = client.fetch_modis_ndvi(bbox, date)
     if ndvi:
         print(f"   Mean NDVI: {ndvi['ndvi_mean']}")
+        print(f"   Source: {ndvi['source']}")
     
     # Test Precipitation
     print("\n2. GPM Precipitation:")
     precip = client.fetch_gpm_precipitation(bbox, date)
     if precip:
         print(f"   Precipitation: {precip['precipitation_mm']} mm")
+        print(f"   Source: {precip['source']}")
     
     # Test Soil Moisture
     print("\n3. SMAP Soil Moisture:")
     soil = client.fetch_smap_soil_moisture(bbox, date)
     if soil:
         print(f"   Soil Moisture: {soil['soil_moisture_m3m3']} m³/m³")
+        print(f"   Source: {soil['source']}")
     
     print("\n✅ All tests completed!")
+    
+    # Show .env location
+    env_path = Path(__file__).parent.parent / '.env'
+    print(f"\n📁 Environment file: {env_path}")
+    if env_path.exists():
+        print("   Status: ✅ Found")
+    else:
+        print("   Status: ❌ Not found")
+        print("   Create .env file with your API credentials")
 
 
 if __name__ == "__main__":

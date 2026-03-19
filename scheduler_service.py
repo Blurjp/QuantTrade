@@ -91,6 +91,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             dates = self._list_available_dates()
             self._send_json({"dates": dates})
 
+        elif self.path == "/debug/cwd":
+            import os as _os
+            self._send_json({"cwd": _os.getcwd(), "output_base": OUTPUT_BASE})
+
+        elif self.path == "/debug/backfill":
+            # List available backfill files
+            backfill_dir = Path(OUTPUT_BASE) / "backfill"
+            files = list(backfill_dir.glob("*.json")) if backfill_dir.exists() else []
+            self._send_json({"backfill_files": [f.name for f in files]})
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
@@ -305,31 +315,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-class DebugHandler(BaseHTTPRequestHandler):
-    """Debug handler to check file contents."""
-    def log_message(self, format, *args):
-        pass
-
-    def do_GET(self):
-        if self.path == "/debug/backfill/hormuz":
-            from pathlib import Path
-            backfill_path = Path("outputs/backfill/hormuz_backfill.json")
-            if backfill_path.exists():
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(backfill_path.read_text().encode())
-            else:
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write(b'{"error": "File not found"}')
-        elif self.path == "/debug/cwd":
-            import os
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"cwd": os.getcwd()}).encode())
-        else:
-            self.send_response(404)
-            self.end_headers()

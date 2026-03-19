@@ -99,7 +99,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             # List available backfill files
             backfill_dir = Path(OUTPUT_BASE) / "backfill"
             files = list(backfill_dir.glob("*.json")) if backfill_dir.exists() else []
-            self._send_json({"backfill_files": [f.name for f in files]})
+            self._send_json({"backfill_files": [f.name for f in files], "backfill_dir": str(backfill_dir), "exists": backfill_dir.exists()})
+
+        elif self.path == "/debug/cwd":
+            import os as _os
+            self._send_json({"cwd": _os.getcwd(), "output_base": OUTPUT_BASE})
 
         else:
             self._send_json({"error": "Not found"}, 404)

@@ -1453,8 +1453,12 @@ def _render_portfolio_monitor(st):
         except json.JSONDecodeError as e:
             st.warning(f"无法解析资产历史文件: {e}")
             return
-        
-        records = history.get("daily_assets", [])
+
+        # Handle both list and dict formats
+        if isinstance(history, list):
+            records = history
+        else:
+            records = history.get("daily_assets", [])
         
         if not records:
             st.info("暂无资产历史数据")

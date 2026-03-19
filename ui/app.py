@@ -5,6 +5,7 @@ Run with:
   streamlit run ui/app.py
 """
 
+import os
 from pathlib import Path
 import json
 import sys
@@ -22,7 +23,9 @@ from pipeline.instruments import get_primary_instrument, list_region_instruments
 from pipeline.regions import list_regions, resolve_region_output_base
 from pipeline.signals import build_monitor_snapshot, latest_region_signal
 from pipeline.ui_data import list_available_days, load_day_bundle
-from pipeline.price_feed import fetch_price_yahoo
+from pipeline.price_feed import fetch_price_yahoo, get_prices_for_portfolio
+from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
+from scripts.rebuild_asset_history import rebuild_asset_history
 from ui.chat import ask, build_system_prompt
 
 
@@ -465,7 +468,24 @@ def _load_daily_brief(output_base: str, selected_day: str) -> str:
     return brief_path.read_text()
 
 
+# Scheduler API URL for fetching data from Railway
+SCHEDULER_API_URL = os.environ.get("SCHEDULER_API_URL", "https://scheduler-production-b60f.up.railway.app")
+
+
+def _fetch_from_scheduler(endpoint: str) -> Optional[Dict]:
+    """Fetch data from scheduler API (used when running on Railway)."""
+    try:
+        url = f"{SCHEDULER_API_URL}{endpoint}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 def _load_persistence_state(output_base: str) -> dict:
+    # Try scheduler API first
     state_path = Path(output_base) / "signal_persistence_state.json"
     if not state_path.exists():
         return {}
@@ -473,6 +493,12 @@ def _load_persistence_state(output_base: str) -> dict:
 
 
 def _load_daily_summary(output_base: str, selected_day: str) -> Dict:
+    # Try scheduler API first (for Railway deployment)
+    api_data = _fetch_from_scheduler("/api/summary")
+    if api_data and not api_data.get("error"):
+        return api_data
+
+    # Fallback to local files
     summary_path = Path(output_base) / selected_day / "daily_summary.json"
     if not summary_path.exists():
         output_root = Path(output_base)
@@ -487,6 +513,12 @@ def _load_daily_summary(output_base: str, selected_day: str) -> Dict:
 
 
 def _resolve_summary_day(output_base: str, selected_day: str) -> str:
+    # Try scheduler API first (for Railway deployment)
+    api_data = _fetch_from_scheduler("/api/summary")
+    if api_data and api_data.get("date"):
+        return api_data["date"]
+
+    # Fallback to local files
     summary_path = Path(output_base) / selected_day / "daily_summary.json"
     if summary_path.exists():
         return selected_day
@@ -1279,17 +1311,10 @@ def _render_portfolio_monitor(st):
         return
     
     positions = portfolio.get("positions", {})
-    cash = portfolio.get("cash", 0)
-    
-    # Fetch current prices
-    tickers = list(positions.keys())
-    current_prices = {}
-    
-    for ticker in tickers:
-        try:
-            current_prices[ticker] = fetch_price_yahoo(ticker)
-        except:
-            current_prices[ticker] = positions[ticker].get("entry_price", 0)
+    cash = float(portfolio.get("cash", 0))
+
+    portfolio_model = MultiAssetPortfolio(output_base="outputs")
+    current_prices = get_prices_for_portfolio(portfolio_model)
     
     # Calculate total value and P&L
     total_position_value = 0
@@ -1297,14 +1322,18 @@ def _render_portfolio_monitor(st):
     max_risk = 0
     
     for ticker, pos in positions.items():
-        current_price = current_prices.get(ticker, pos.get("entry_price", 0))
-        entry_price = pos.get("entry_price", 0)
-        quantity = pos.get("quantity", 0)
+        entry_price = float(pos.get("entry_price", 0))
+        current_price = float(current_prices.get(ticker) or entry_price)
+        quantity = float(pos.get("quantity", 0))
         direction = pos.get("direction", "long")
-        stop_loss = pos.get("stop_loss", 0)
+        stop_loss = float(pos.get("stop_loss", 0))
+        initial_position_value = float(pos.get("position_value", entry_price * quantity))
         
-        # Position value
-        position_value = current_price * quantity
+        # Mark-to-market position value
+        if direction == "long":
+            position_value = current_price * quantity
+        else:
+            position_value = initial_position_value + ((entry_price - current_price) * quantity)
         total_position_value += position_value
         
         # P&L calculation
@@ -1367,39 +1396,138 @@ def _render_portfolio_monitor(st):
         st.markdown("### Current Positions")
         
         for ticker, pos in positions.items():
-            current_price = current_prices.get(ticker, pos.get("entry_price", 0))
-            entry_price = pos.get("entry_price", 0)
-            quantity = pos.get("quantity", 0)
+            entry_price = float(pos.get("entry_price", 0))
+            current_price = float(current_prices.get(ticker) or entry_price)
+            quantity = float(pos.get("quantity", 0))
             direction = pos.get("direction", "long")
-            stop_loss = pos.get("stop_loss", 0)
-            take_profit = pos.get("take_profit", 0)
+            stop_loss = float(pos.get("stop_loss", 0))
+            take_profit = float(pos.get("take_profit", 0))
             grade = pos.get("signal_grade", "N/A")
             accuracy = pos.get("signal_accuracy", 0)
+            initial_position_value = float(pos.get("position_value", entry_price * quantity))
             
             if direction == "long":
                 pnl = (current_price - entry_price) * quantity
                 pnl_pct = ((current_price - entry_price) / entry_price) * 100
+                position_value = current_price * quantity
             else:
                 pnl = (entry_price - current_price) * quantity
                 pnl_pct = ((entry_price - current_price) / entry_price) * 100
+                position_value = initial_position_value + pnl
             
             # Color based on P&L
             pnl_color = "green" if pnl >= 0 else "red"
             direction_emoji = "🔴" if direction == "short" else "🟢"
-            
-            st.markdown(f"""
-            **{direction_emoji} {ticker} {direction.upper()}**
-            
-            Entry: ${entry_price:.2f} | Current: ${current_price:.2f} | 
-            P&L: <span style="color:{pnl_color}">${pnl:+,.2f} ({pnl_pct:+.2f}%)</span> |
-            Stop: ${stop_loss:.2f} | Target: ${take_profit:.2f} |
-            Grade: {grade} ⭐ | Accuracy: {accuracy:.0f}%
-            
-            ---
-            """, unsafe_allow_html=True)
-    
-    st.markdown("")
 
+            st.markdown(f"**{direction_emoji} {ticker} {direction.upper()}**")
+            st.markdown(
+                f"Entry: `${entry_price:.2f}` | Current: `${current_price:.2f}` | "
+                f"Position: `${position_value:,.2f}` | "
+                f"P&L: <span style=\"color:{pnl_color}\">${pnl:+,.2f} ({pnl_pct:+.2f}%)</span> | "
+                f"Stop: `${stop_loss:.2f}` | Target: `${take_profit:.2f}` | "
+                f"Grade: `{grade}` | Accuracy: `{accuracy:.0f}%`",
+                unsafe_allow_html=True,
+            )
+            st.markdown("---")
+    
+        st.markdown("")
+        
+        # Add equity curve section
+        st.subheader("📈 资产曲线")
+        action_col1, action_col2 = st.columns([1, 5])
+        with action_col1:
+            if st.button("重建曲线", key="rebuild_asset_history"):
+                rebuilt = rebuild_asset_history(output_base="outputs", initial_capital=100000.0)
+                st.success(f"已重建 {len(rebuilt.get('daily_assets', []))} 个资产点")
+        with action_col2:
+            st.caption("如果组合文件或历史价格修正了，可以点这里重新生成资产曲线。")
+        
+        # Load asset history
+        tracker_path = PROJECT_ROOT / "outputs" / "asset_history.json"
+        if not tracker_path.exists():
+            st.info("暂无资产历史数据。运行 pipeline 后会自动记录。")
+            return
+        
+        try:
+            history = json.loads(tracker_path.read_text())
+        except json.JSONDecodeError as e:
+            st.warning(f"无法解析资产历史文件: {e}")
+            return
+        
+        records = history.get("daily_assets", [])
+        
+        if not records:
+            st.info("暂无资产历史数据")
+            return
+
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        updated_today = False
+        for item in records:
+            if item.get("date") == today_str:
+                item["total_value"] = round(total_assets, 2)
+                item["timestamp"] = datetime.now().isoformat()
+                updated_today = True
+                break
+        if not updated_today:
+            records.append({
+                "date": today_str,
+                "total_value": round(total_assets, 2),
+                "timestamp": datetime.now().isoformat(),
+            })
+        
+        # Create DataFrame
+        df = pd.DataFrame(records)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date")
+        df["total_value"] = pd.to_numeric(df["total_value"], errors="coerce")
+        df = df.dropna(subset=["total_value"])
+
+        if df.empty:
+            st.info("资产历史为空，暂时无法绘制曲线。")
+            return
+        
+        # Calculate daily returns
+        df["daily_return"] = df["total_value"].pct_change() * 100
+        df["equity_return_pct"] = ((df["total_value"] / df.iloc[0]["total_value"]) - 1) * 100
+        
+        # Metrics
+        start_value = df.iloc[0]["total_value"]
+        end_value = df.iloc[-1]["total_value"]
+        total_return = ((end_value - start_value) / start_value * 100) if start_value > 0 else 0
+        running_peak = df["total_value"].cummax()
+        drawdown_pct = ((df["total_value"] / running_peak) - 1) * 100
+        max_drawdown = drawdown_pct.min() if not drawdown_pct.empty else 0
+        latest_change = df.iloc[-1]["daily_return"] if len(df) > 1 else 0
+        
+        # Display metrics
+        st.caption("按 cash + 持仓实时市值 mark-to-market 计算；空头仓位会按当前价格重估，不再固定按开仓价记账。")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric("起始资产", f"${start_value:,.2f}")
+        col2.metric("当前资产", f"${end_value:,.1f}")
+        col3.metric("总收益率", f"{total_return:.1f}%")
+        col4.metric("最大回撤", f"{max_drawdown:.1f}%", f"{latest_change:+.2f}% 今日变动")
+        
+        # Equity curve chart
+        st.line_chart(
+            df.set_index("date")["total_value"],
+            use_container_width=True,
+        )
+
+        st.caption("这条曲线反映组合总资产，不只是现金；如果当天重复跑 pipeline，同一天资产值会被覆盖更新。")
+        
+        # Daily returns chart
+        st.subheader("📊 每日收益率")
+        st.bar_chart(
+            df.set_index("date")["daily_return"],
+            use_container_width=True,
+        )
+        
+        # Show data table
+        with st.expander("查看详细数据"):
+            display_df = df[["date", "total_value", "daily_return", "equity_return_pct"]].copy()
+            display_df.columns = ["date", "total_value", "daily_return_pct", "equity_return_pct"]
+            st.dataframe(display_df, use_container_width=True)
 
 def main():
     import streamlit as st

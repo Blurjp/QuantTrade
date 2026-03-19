@@ -31,22 +31,26 @@ sys.path.insert(0, str(PROJECT_ROOT))
 last_run_time = None
 last_run_status = "never"
 pipeline_runs = 0
+OUTPUT_BASE = "outputs"
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Simple HTTP handler for Railway health checks."""
+    """Simple HTTP handler for Railway health checks and API."""
 
     def log_message(self, format, *args):
         pass  # Suppress default logging
+
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, default=str).encode())
 
     def do_GET(self):
         global last_run_time, last_run_status, pipeline_runs
 
         if self.path == "/health" or self.path == "/":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-
             response = {
                 "status": "healthy",
                 "service": "quanttrade-scheduler",
@@ -55,14 +59,74 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "total_runs": pipeline_runs,
                 "interval_minutes": int(os.environ.get("PIPELINE_INTERVAL_MINUTES", "60")),
             }
-            self.wfile.write(json.dumps(response).encode())
+            self._send_json(response)
+
+        elif self.path == "/api/summary":
+            # Serve the latest daily summary
+            summary = self._get_latest_summary()
+            if summary:
+                self._send_json(summary)
+            else:
+                self._send_json({"error": "No summary available"}, 404)
+
+        elif self.path == "/api/signals":
+            # Serve the latest signals
+            summary = self._get_latest_summary()
+            if summary:
+                self._send_json({"date": summary.get("date"), "signals": summary.get("signals", {})})
+            else:
+                self._send_json({"error": "No signals available"}, 404)
+
+        elif self.path.startswith("/api/summary/"):
+            # Serve summary for a specific date
+            date_str = self.path.split("/")[-1]
+            summary = self._get_summary_for_date(date_str)
+            if summary:
+                self._send_json(summary)
+            else:
+                self._send_json({"error": f"No summary for {date_str}"}, 404)
+
+        elif self.path == "/api/dates":
+            # List available dates
+            dates = self._list_available_dates()
+            self._send_json({"dates": dates})
+
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send_json({"error": "Not found"}, 404)
 
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
+
+    def _get_latest_summary(self):
+        """Get the most recent daily summary."""
+        output_root = Path(OUTPUT_BASE)
+        candidates = sorted(
+            path.parent.name for path in output_root.glob("*/daily_summary.json")
+            if path.parent.name[:4].isdigit()
+        )
+        if not candidates:
+            return None
+        latest = candidates[-1]
+        return self._get_summary_for_date(latest)
+
+    def _get_summary_for_date(self, date_str: str):
+        """Get summary for a specific date."""
+        summary_path = Path(OUTPUT_BASE) / date_str / "daily_summary.json"
+        if not summary_path.exists():
+            return None
+        try:
+            return json.loads(summary_path.read_text())
+        except Exception:
+            return None
+
+    def _list_available_dates(self):
+        """List all available summary dates."""
+        output_root = Path(OUTPUT_BASE)
+        return sorted(
+            path.parent.name for path in output_root.glob("*/daily_summary.json")
+            if path.parent.name[:4].isdigit()
+        )
 
 
 def start_health_server(port=8080):

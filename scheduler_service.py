@@ -101,20 +101,68 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             files = list(backfill_dir.glob("*.json")) if backfill_dir.exists() else []
             self._send_json({"backfill_files": [f.name for f in files], "backfill_dir": str(backfill_dir), "exists": backfill_dir.exists()})
 
-        elif self.path == "/debug/trigger-backfill":
-            # Manually trigger backfill and return results
+        elif self.path == "/debug/regions":
+            # List active regions for debugging
             try:
-                result = ensure_backfill_data(OUTPUT_BASE)
-                backfill_dir = Path(OUTPUT_BASE) / "backfill"
-                files = list(backfill_dir.glob("*.json")) if backfill_dir.exists() else []
+                from pipeline.regions import get_active_regions
+                regions = get_active_regions()
                 self._send_json({
-                    "backfill_triggered": result,
-                    "backfill_files": [f.name for f in files],
-                    "backfill_dir": str(backfill_dir),
+                    "active_regions": list(regions.keys()),
+                    "count": len(regions),
                 })
             except Exception as e:
                 import traceback
                 self._send_json({"error": str(e), "traceback": traceback.format_exc()}, 500)
+
+        elif self.path == "/debug/trigger-backfill":
+            # Manually trigger backfill and return detailed results
+            import traceback as tb
+            try:
+                from pipeline.regions import get_active_regions
+                from scripts.run_backfill import run_auto_backfill
+
+                backfill_dir = Path(OUTPUT_BASE) / "backfill"
+                backfill_dir.mkdir(parents=True, exist_ok=True)
+
+                regions = get_active_regions()
+                region_ids = list(regions.keys())
+
+                # Check which regions need backfill
+                missing = []
+                for rid in region_ids:
+                    bf_file = backfill_dir / f"{rid}_backfill.json"
+                    if not bf_file.exists():
+                        missing.append(rid)
+
+                if not missing:
+                    self._send_json({
+                        "status": "all_backfill_exists",
+                        "regions": region_ids,
+                        "missing": [],
+                    })
+                    return
+
+                # Run backfill
+                result = run_auto_backfill(
+                    regions_filter=missing,
+                    output_base=OUTPUT_BASE,
+                )
+
+                # Check files after
+                files = list(backfill_dir.glob("*.json"))
+
+                self._send_json({
+                    "status": "backfill_complete",
+                    "regions": region_ids,
+                    "missing": missing,
+                    "result": result,
+                    "files_created": [f.name for f in files],
+                })
+            except Exception as e:
+                self._send_json({
+                    "error": str(e),
+                    "traceback": tb.format_exc(),
+                }, 500)
 
         else:
             self._send_json({"error": "Not found"}, 404)

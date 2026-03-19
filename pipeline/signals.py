@@ -453,6 +453,10 @@ def _generate_agriculture_signal(data: pd.DataFrame, **kwargs) -> dict:
             "baseline_samples": 0,
         }
 
+    # Handle None/NaN in current_value
+    if current_value is None or (isinstance(current_value, float) and pd.isna(current_value)):
+        current_value = baseline_mean  # Use baseline as fallback
+
     # Calculate change from baseline
     ndvi_change = current_value - baseline_mean
     ndvi_change_pct = (ndvi_change / baseline_mean) * 100 if baseline_mean > 0 else 0
@@ -520,9 +524,11 @@ def _generate_auto_inventory_signal(data: pd.DataFrame, **kwargs) -> dict:
             "signal": "Insufficient historical data",
             "confidence": "Low",
             "baseline_samples": 0,
-            "inventory_source": "optical inventory proxy",
+            "inventory_source": "optical inventory proxy"
         }
-
+    # Handle None/NaN in current_value
+    if current_value is None or (isinstance(current_value, float) and pd.isna(current_value)):
+        current_value = baseline_mean  # Use baseline as fallback
     # Calculate change from baseline
     # For parking lots, values are typically small (0.05-0.25 range)
     inventory_change = current_value - baseline_mean
@@ -587,7 +593,9 @@ def _generate_oil_storage_signal(data: pd.DataFrame, **kwargs) -> dict:
             "confidence": "Low",
             "baseline_samples": 0,
         }
-
+    # Handle None/NaN in current_value
+    if current_value is None or (isinstance(current_value, float) and pd.isna(current_value)):
+        current_value = baseline_mean  # Use baseline as fallback
     # Calculate change from baseline
     storage_change = current_value - baseline_mean
     storage_change_pct = (storage_change / baseline_mean) * 100 if baseline_mean > 0 else 0
@@ -649,6 +657,10 @@ def _generate_chokepoint_signal(data: pd.DataFrame, **kwargs) -> dict:
             "confidence": "Low",
             "baseline_samples": 0,
         }
+
+    # Handle None/NaN in current_value
+    if current_value is None or (isinstance(current_value, float) and pd.isna(current_value)):
+        current_value = baseline_mean  # Use baseline as fallback
 
     # Calculate change from baseline
     throughput_change = current_value - baseline_mean

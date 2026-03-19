@@ -305,3 +305,31 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+class DebugHandler(BaseHTTPRequestHandler):
+    """Debug handler to check file contents."""
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == "/debug/backfill/hormuz":
+            from pathlib import Path
+            backfill_path = Path("outputs/backfill/hormuz_backfill.json")
+            if backfill_path.exists():
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(backfill_path.read_text().encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b'{"error": "File not found"}')
+        elif self.path == "/debug/cwd":
+            import os
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"cwd": os.getcwd()}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()

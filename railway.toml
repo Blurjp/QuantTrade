@@ -11,3 +11,6 @@ healthcheckTimeout = 300
 [deploy.variables]
 PIPELINE_INTERVAL_MINUTES = "60"
 PYTHON_VERSION = "3.11"
+
+# Note: Persistent volume must be added via Railway dashboard:
+# railway volume create --name quanttrade-data --mount /app/outputs --service scheduler

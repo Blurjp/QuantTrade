@@ -1,0 +1,5 @@
+# Nixpacks configuration for Railway
+# Install system dependencies for geospatial packages
+
+[phases.setup]
+aptPkgs = ["gdal-bin", "libgdal-dev", "python3-gdal"]

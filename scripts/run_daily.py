@@ -210,9 +210,11 @@ def _extract_signal_frame(region_type: str, detection: dict, region_id: str, out
             live_frame = pd.DataFrame([row])
 
         backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
+        print(f"[DEBUG] {region_id}: Looking for backfill at {backfill_file}, exists={backfill_file.exists()}")
         if backfill_file.exists():
             history = json.loads(backfill_file.read_text())
             stats = history.get("daily_stats") or history.get("weekly_stats") or []
+            print(f"[DEBUG] {region_id}: Found {len(stats)} backfill records")
             frame = pd.DataFrame(stats)
             if not frame.empty and 'date' in frame.columns:
                 if not live_frame.empty and 'date' in live_frame.columns:
@@ -229,25 +231,32 @@ def _extract_signal_frame(region_type: str, detection: dict, region_id: str, out
         live_frame = pd.DataFrame([row])
 
     backfill_file = Path(output_base) / "backfill" / f"{region_id}_backfill.json"
+    print(f"[DEBUG] {region_id}: Looking for backfill at {backfill_file}, exists={backfill_file.exists()}")
     if backfill_file.exists():
         history = json.loads(backfill_file.read_text())
         stats = history.get("daily_stats") or history.get("weekly_stats") or []
+        print(f"[DEBUG] {region_id}: Found {len(stats)} backfill records")
         frame = pd.DataFrame(stats)
         if not frame.empty and 'date' in frame.columns:
             if not live_frame.empty and 'date' in live_frame.columns:
                 merged = pd.concat([frame, live_frame], ignore_index=True, sort=False)
                 merged = merged.sort_values('date').drop_duplicates(subset=['date'], keep='last')
+                print(f"[DEBUG] {region_id}: Merged frame has {len(merged)} rows")
                 return merged
+            print(f"[DEBUG] {region_id}: Using backfill only, {len(frame)} rows")
             return frame.sort_values('date')
 
     if not live_frame.empty:
+        print(f"[DEBUG] {region_id}: Using live frame only, {len(live_frame)} rows")
         return live_frame
 
     count = detection.get("count") if isinstance(detection, dict) else None
     target_date = detection.get("date") if isinstance(detection, dict) else None
     if region_type in {"chokepoint", "port_logistics"} and count is not None and target_date:
+        print(f"[DEBUG] {region_id}: Creating frame from count={count}")
         return pd.DataFrame([{"date": target_date, "detections": count}])
 
+    print(f"[DEBUG] {region_id}: No data available!")
     return pd.DataFrame()
 
 

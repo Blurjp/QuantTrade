@@ -345,16 +345,18 @@ class MultiAssetPortfolio:
     def get_total_value(self, prices: Dict[str, float]) -> float:
         """Calculate total portfolio value."""
         total = self.cash
-        
+
         for ticker, pos in self.positions.items():
-            if ticker in prices:
+            price = prices.get(ticker)
+            if price is not None and price > 0:
                 if pos.direction == "long":
-                    total += pos.quantity * prices[ticker]
+                    total += pos.quantity * price
                 else:  # short
-                    total += pos.position_value + pos.quantity * (pos.entry_price - prices[ticker])
+                    total += pos.position_value + pos.quantity * (pos.entry_price - price)
             else:
-                total += pos.position_value + pos.unrealized_pnl
-        
+                # Fallback to position value if price unavailable
+                total += pos.position_value + (pos.unrealized_pnl or 0)
+
         return total
     
     def get_summary(self, prices: Dict[str, float]) -> dict:

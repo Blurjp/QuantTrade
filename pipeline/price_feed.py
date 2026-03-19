@@ -194,11 +194,11 @@ def get_prices_for_portfolio(portfolio) -> Dict[str, float]:
     Get prices for all instruments in portfolio.
     """
     tickers = set()
-    
+
     # Add tickers from open positions
     for ticker in portfolio.positions.keys():
         tickers.add(ticker)
-    
+
     # Add tickers from all active regions
     from pipeline.regions import load_registry
     try:
@@ -208,13 +208,18 @@ def get_prices_for_portfolio(portfolio) -> Dict[str, float]:
                 instruments = region_config.get("instruments", [])
                 for inst in instruments:
                     if isinstance(inst, dict):
-                        tickers.add(inst.get("ticker"))
-                    else:
+                        ticker = inst.get("ticker")
+                        if ticker:
+                            tickers.add(ticker)
+                    elif inst:
                         tickers.add(inst)
-    except:
+    except Exception:
         pass
-    
-    return fetch_all_prices(list(tickers))
+
+    prices = fetch_all_prices(list(tickers))
+
+    # Ensure no None values
+    return {k: v if v is not None else DEFAULT_PRICES.get(k, 0) for k, v in prices.items()}
 
 
 if __name__ == "__main__":

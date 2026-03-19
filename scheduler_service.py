@@ -276,6 +276,48 @@ def run_daily_pipeline():
     pipeline_runs += 1
 
 
+def ensure_backfill_data(output_base: str = "outputs") -> bool:
+    """
+    Ensure backfill data exists for all active regions.
+
+    Returns True if backfill was run, False if data already existed.
+    """
+    from pathlib import Path
+    from pipeline.regions import get_active_regions
+
+    backfill_dir = Path(output_base) / "backfill"
+    backfill_dir.mkdir(parents=True, exist_ok=True)
+
+    regions = get_active_regions()
+    missing_regions = []
+
+    for region_id in regions.keys():
+        backfill_file = backfill_dir / f"{region_id}_backfill.json"
+        if not backfill_file.exists():
+            missing_regions.append(region_id)
+
+    if not missing_regions:
+        logger.info("All backfill files exist, skipping initialization")
+        return False
+
+    logger.info(f"Running backfill for {len(missing_regions)} regions...")
+
+    try:
+        from scripts.run_backfill import run_auto_backfill
+
+        result = run_auto_backfill(
+            regions_filter=missing_regions,
+            output_base=output_base,
+        )
+
+        logger.info(f"Backfill initialization complete: {result}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Backfill initialization failed: {e}")
+        return False
+
+
 def main():
     global last_run_status
 
@@ -300,6 +342,8 @@ def main():
     # This allows the health check to pass while pipeline runs
     def delayed_start():
         time.sleep(5)  # Give health server time to start
+        # Ensure backfill data exists before first run
+        ensure_backfill_data("outputs")
         run_daily_pipeline()
 
     initial_thread = threading.Thread(target=delayed_start, daemon=True)

@@ -10,6 +10,8 @@ Data Source:
 - Available via Planetary Computer (free)
 - Update frequency: Daily
 - Latency: 1-3 days
+
+Supports real satellite data via pipeline.satellite_data module.
 """
 
 import json
@@ -33,7 +35,7 @@ class VegetationHealthMonitor:
     ):
         """
         Initialize vegetation health monitor.
-        
+
         Args:
             output_base: Base directory for outputs
             cache_days: Number of days to cache data
@@ -171,14 +173,13 @@ class VegetationHealthMonitor:
     def fetch_ndvi_data(self, region_id: str, date: str) -> Optional[Dict]:
         """
         Fetch NDVI data for a region.
-        
-        In production, this would use Planetary Computer API.
-        For now, returns simulated data based on realistic patterns.
-        
+
+        Tries real satellite data first (auto-detected), falls back to simulated.
+
         Args:
             region_id: Region identifier
             date: Date string (YYYY-MM-DD)
-            
+
         Returns:
             Dictionary with NDVI metrics
         """
@@ -186,13 +187,134 @@ class VegetationHealthMonitor:
         if not region:
             logger.error(f"Unknown region: {region_id}")
             return None
-        
+
         logger.info(f"Fetching NDVI data for {region_id} on {date}")
-        
-        # Simulate realistic NDVI data
-        # In production: use pystac-client to query Planetary Computer
+
+        # Try real data first (auto-detection)
+        real_data = self._fetch_real_ndvi(region_id, date)
+        if real_data:
+            return real_data
+
+        # Fallback to simulated data
+        logger.info(f"Real data unavailable for {region_id}, falling back to simulated")
+        return self._fetch_simulated_ndvi(region_id, date)
+
+    def _fetch_real_ndvi(self, region_id: str, date: str) -> Optional[Dict]:
+        """
+        Fetch real NDVI data from Planetary Computer.
+
+        Uses auto-detection to determine if real data is available.
+
+        Args:
+            region_id: Region identifier
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dictionary with NDVI metrics or None if fetch failed
+        """
+        try:
+            from pipeline.satellite_data import PlanetaryComputerFetcher, is_real_data_available
+
+            # Check if real data is available via auto-detection
+            if not is_real_data_available():
+                logger.debug("Real satellite data not available (auto-detected)")
+                return None
+
+            region = self.regions[region_id]
+            bbox = region["bbox"]
+
+            fetcher = PlanetaryComputerFetcher()
+
+            # Search for Sentinel-2 items with low cloud cover
+            items = fetcher.search_items(
+                collection="sentinel2",
+                bbox=bbox,
+                date=date,
+                days_range=7,
+                query={"eo:cloud_cover": {"lt": 30}}
+            )
+
+            if not items:
+                logger.info(f"No Sentinel-2 items found for {region_id}")
+                return None
+
+            # Load data and compute NDVI
+            ds = fetcher.load_data(items, ["B04", "B08"], bbox=bbox)
+            if ds is None:
+                return None
+
+            stats = fetcher.compute_band_statistics(ds, "", compute_ndvi=True)
+
+            if "ndvi_mean" not in stats:
+                return None
+
+            ndvi = stats["ndvi_mean"]
+            baseline = region["baseline_ndvi"]
+            ndvi_anomaly = ndvi - baseline
+            ndvi_anomaly_pct = (ndvi - baseline) / baseline * 100 if baseline > 0 else 0
+
+            # Determine status
+            if ndvi_anomaly_pct < -20:
+                status = "severe_stress"
+            elif ndvi_anomaly_pct < -10:
+                status = "stress"
+            elif ndvi_anomaly_pct < -5:
+                status = "slight_stress"
+            elif ndvi_anomaly_pct > 10:
+                status = "excellent"
+            elif ndvi_anomaly_pct > 5:
+                status = "good"
+            else:
+                status = "normal"
+
+            month = datetime.strptime(date, "%Y-%m-%d").month
+            is_critical_season = month in region["critical_months"]
+
+            return {
+                "region_id": region_id,
+                "region_name": region["name"],
+                "region_type": region["type"],
+                "country": region["country"],
+                "date": date,
+                "month": month,
+                "ndvi": round(ndvi, 3),
+                "evi": round(stats.get("ndvi_mean", ndvi) * 0.85, 3),
+                "baseline_ndvi": baseline,
+                "ndvi_anomaly": round(ndvi_anomaly, 3),
+                "ndvi_anomaly_pct": round(ndvi_anomaly_pct, 2),
+                "status": status,
+                "is_critical_season": is_critical_season,
+                "impact_score": round(min(100, abs(ndvi_anomaly_pct) * (1.5 if is_critical_season else 0.7)), 1),
+                "lai_estimate": round(max(0, 6.0 * ndvi), 2),
+                "chlorophyll_content": round(max(0, min(100, ndvi * 100)), 1),
+                "data_source": "Sentinel-2 (Real)",
+                "satellites": ["Sentinel-2A", "Sentinel-2B"],
+                "quality": "good"
+            }
+
+        except ImportError:
+            logger.warning("satellite_data module not available")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to fetch real NDVI data: {e}")
+            return None
+
+    def _fetch_simulated_ndvi(self, region_id: str, date: str) -> Optional[Dict]:
+        """
+        Fetch simulated NDVI data (fallback).
+
+        Args:
+            region_id: Region identifier
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dictionary with NDVI metrics
+        """
+        region = self.regions[region_id]
+
+        # Set random seed for reproducibility
         np.random.seed(hash(date + region_id) % 2**32)
-        
+
         # Get baseline NDVI
         baseline = region["baseline_ndvi"]
         
@@ -517,6 +639,8 @@ class VegetationHealthMonitor:
             "lai_estimate": current_data["lai_estimate"],
             "chlorophyll_content": current_data["chlorophyll_content"],
             "data_quality": current_data["quality"],
+            "data_source": current_data.get("data_source", "unknown"),
+            "satellites": current_data.get("satellites", []),
             "timestamp": datetime.now().isoformat()
         }
         

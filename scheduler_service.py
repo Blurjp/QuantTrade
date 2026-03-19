@@ -203,6 +203,8 @@ def run_daily_pipeline():
 
 
 def main():
+    global last_run_status
+
     refresh_interval = int(os.environ.get("PIPELINE_INTERVAL_MINUTES", "60"))
     port = int(os.environ.get("PORT", "8080"))
 
@@ -213,11 +215,21 @@ def main():
     logger.info(f"Real satellite data: auto-detected")
     logger.info("=" * 60)
 
-    # Start health check server for Railway
+    # Start health check server for Railway FIRST
+    # This ensures the health endpoint responds immediately
     start_health_server(port)
 
-    # Run once at startup
-    run_daily_pipeline()
+    # Mark as ready for health checks
+    last_run_status = "initialized"
+
+    # Run pipeline in background thread after short delay
+    # This allows the health check to pass while pipeline runs
+    def delayed_start():
+        time.sleep(5)  # Give health server time to start
+        run_daily_pipeline()
+
+    initial_thread = threading.Thread(target=delayed_start, daemon=True)
+    initial_thread.start()
 
     # Schedule recurring runs
     schedule.every(refresh_interval).minutes.do(run_daily_pipeline)

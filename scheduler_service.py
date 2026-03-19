@@ -289,10 +289,15 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
     from pathlib import Path
     from pipeline.regions import get_active_regions
 
+    logger.info(f"ensure_backfill_data: Starting with output_base={output_base}")
+
     backfill_dir = Path(output_base) / "backfill"
     backfill_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"ensure_backfill_data: backfill_dir={backfill_dir}, exists={backfill_dir.exists()}")
 
     regions = get_active_regions()
+    logger.info(f"ensure_backfill_data: Found {len(regions)} active regions")
+
     missing_regions = []
 
     for region_id in regions.keys():
@@ -300,11 +305,13 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
         if not backfill_file.exists():
             missing_regions.append(region_id)
 
+    logger.info(f"ensure_backfill_data: {len(missing_regions)} missing backfill files")
+
     if not missing_regions:
         logger.info("All backfill files exist, skipping initialization")
         return False
 
-    logger.info(f"Running backfill for {len(missing_regions)} regions...")
+    logger.info(f"Running backfill for {len(missing_regions)} regions: {missing_regions[:5]}...")
 
     try:
         from scripts.run_backfill import run_auto_backfill
@@ -319,6 +326,8 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
 
     except Exception as e:
         logger.error(f"Backfill initialization failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 

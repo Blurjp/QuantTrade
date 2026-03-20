@@ -1,0 +1,14 @@
+# Large directories that don't need to be uploaded
+outputs/
+data/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+*.egg-info/
+.env
+.env.local
+*.log
+node_modules/

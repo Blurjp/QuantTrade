@@ -2,6 +2,4 @@
 # Install system dependencies for geospatial packages
 
 [phases.setup]
-nixPkgs = ["...", "gdal", "expat", "libxml2"]
-nixLibs = ["expat", "libxml2"]
-aptPkgs = ["...", "gdal-bin", "libgdal-dev", "python3-gdal", "libexpat1", "libxml2"]
+aptPkgs = ["...", "gdal-bin", "libgdal-dev", "python3-gdal", "libexpat1", "libstdc++6"]

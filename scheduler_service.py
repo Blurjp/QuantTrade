@@ -345,6 +345,7 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
 
     Returns True if backfill was run, False if data already existed.
     """
+    import subprocess
     from pathlib import Path
     from pipeline.regions import get_active_regions
 
@@ -373,16 +374,33 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
     logger.info(f"Running backfill for {len(missing_regions)} regions: {missing_regions[:5]}...")
 
     try:
-        from scripts.run_backfill import run_auto_backfill
+        # Run backfill as subprocess to avoid import issues with numpy/rasterio
+        cmd = [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "run_backfill.py"),
+            "--output", output_base,
+        ] + missing_regions
 
-        result = run_auto_backfill(
-            regions_filter=missing_regions,
-            output_base=output_base,
+        logger.info(f"Running backfill command: {' '.join(cmd[:5])}...")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            cwd=str(PROJECT_ROOT),
         )
 
-        logger.info(f"Backfill initialization complete: {result}")
-        return True
+        if result.returncode == 0:
+            logger.info(f"Backfill initialization complete: {result.stdout[-500:] if len(result.stdout) > 500 else result.stdout}")
+            return True
+        else:
+            logger.error(f"Backfill failed with code {result.returncode}: {result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr}")
+            return False
 
+    except subprocess.TimeoutExpired:
+        logger.error("Backfill initialization timed out after 600 seconds")
+        return False
     except Exception as e:
         logger.error(f"Backfill initialization failed: {e}")
         import traceback

@@ -318,6 +318,16 @@ def run_daily_pipeline():
     except Exception as e:
         logger.error(f"Satellite monitoring failed: {e}")
 
+    # Check signals and send notifications
+    logger.info("Checking signals for notifications...")
+    try:
+        from notifications.signal_monitor import SignalMonitor
+        monitor = SignalMonitor()
+        summary = monitor.check_all_modules()
+        logger.info(f"Signal check complete: {summary['actionable_signals']} actionable, {summary['notified']} notifications sent")
+    except Exception as e:
+        logger.error(f"Signal monitoring failed: {e}")
+
     # Run main pipeline
     try:
         result = _run_pipeline(target_date=today, output_base="outputs")

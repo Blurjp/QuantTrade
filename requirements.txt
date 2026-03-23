@@ -30,9 +30,12 @@ distributed>=2023.12.0
 click>=8.1.0
 pydantic>=2.5.0
 python-dateutil>=2.8.0
+pytz>=2024.0
+python-dotenv>=1.0.0
 tqdm>=4.66.0
 pytest>=8.0.0
 scikit-learn>=1.4.0
+schedule>=1.2.0
 
 # LLM chat
 openai>=1.0.0
@@ -46,6 +49,10 @@ fastapi>=0.115.0
 uvicorn>=0.30.0
 yfinance>=0.2.54
 vectorbt>=0.27.0
+
+# Notifications
+twilio>=9.0.0
+requests>=2.32.0
 
 # Optional: future experiments
 # raster-vision>=0.21.0

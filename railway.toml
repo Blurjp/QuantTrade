@@ -9,8 +9,29 @@ healthcheckPath = "/health"
 healthcheckTimeout = 300
 
 [deploy.variables]
-PIPELINE_INTERVAL_MINUTES = "60"
+PIPELINE_INTERVAL_MINUTES = "30"
 PYTHON_VERSION = "3.11"
+MONITORING_START_HOUR = "7"
+MONITORING_END_HOUR = "24"
 
 # Note: Persistent volume must be added via Railway dashboard:
 # railway volume create --name quanttrade-data --mount /app/outputs --service scheduler
+
+# Cron Jobs (configured via Railway Dashboard or CLI)
+# 
+# Signal Monitor - Every 30 minutes between 7 AM and 11 PM EST
+# Schedule: */30 7-23 * * *
+# Command: python cron_check_signals.py
+# 
+# To add this cron job:
+# 1. Go to Railway Dashboard
+# 2. Select your service
+# 3. Go to "Settings" → "Cron Jobs"
+# 4. Add new cron job:
+#    - Name: signal-monitor
+#    - Schedule: */30 7-23 * * *
+#    - Command: python cron_check_signals.py
+#    - Timezone: America/New_York
+#
+# Or via CLI:
+# railway cron add --name signal-monitor --schedule "*/30 7-23 * * *" --command "python cron_check_signals.py" --service scheduler

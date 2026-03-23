@@ -10,10 +10,14 @@ Data Source:
 - Available via NASA/GES DISC (free)
 - Update frequency: Daily
 - Latency: 1-3 days
+
+Supports both real satellite data (via NASA GES DISC API) and simulated data
+for testing and development purposes.
 """
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -33,7 +37,7 @@ class PrecipitationMonitor:
     ):
         """
         Initialize precipitation monitor.
-        
+
         Args:
             output_base: Base directory for outputs
             cache_days: Number of days to cache data
@@ -158,14 +162,13 @@ class PrecipitationMonitor:
     def fetch_precipitation_data(self, region_id: str, date: str) -> Optional[Dict]:
         """
         Fetch precipitation data for a region.
-        
-        In production, this would use NASA GES DISC API.
-        For now, returns simulated data based on realistic patterns.
-        
+
+        Tries real satellite data first if available, falls back to simulated data.
+
         Args:
             region_id: Region identifier
             date: Date string (YYYY-MM-DD)
-            
+
         Returns:
             Dictionary with precipitation metrics
         """
@@ -173,23 +176,147 @@ class PrecipitationMonitor:
         if not region:
             logger.error(f"Unknown region: {region_id}")
             return None
-        
+
         logger.info(f"Fetching precipitation data for {region_id} on {date}")
-        
+
+        # Try real data first, fallback to simulated
+        real_data = self._fetch_real_precipitation(region_id, region, date)
+        if real_data:
+            logger.info(f"Using real NASA GPM precipitation data for {region_id}")
+            return real_data
+
+        # Fallback to simulated data
+        logger.info(f"NASA GPM data unavailable, using simulated precipitation data for {region_id}")
+        return self._fetch_simulated_precipitation(region_id, region, date)
+
+    def _fetch_real_precipitation(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
+        """
+        Fetch real precipitation data from NASA GES DISC (GPM/IMERG).
+
+        Args:
+            region_id: Region identifier
+            region: Region configuration dictionary
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dictionary with precipitation metrics or None if fetch failed
+        """
+        try:
+            from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, is_real_data_available
+
+            # Check if real data is available
+            if not is_real_data_available():
+                logger.debug("Real satellite data not available, using simulated data")
+                return None
+
+            cache = DataCache()
+            fetcher = NASAGESDISCFetcher(cache)
+
+            # Get bounding box for region
+            bbox = region["bbox"]
+
+            # Fetch precipitation data from NASA GES DISC
+            result = fetcher.fetch_precipitation(
+                bbox=bbox,
+                date=date,
+                days_range=7
+            )
+
+            if not result:
+                return None
+
+            # Extract values from real data
+            daily_precip = result.get("daily_precip_mm", 0)
+            monthly_precip = daily_precip * 30  # Extrapolate to monthly
+            baseline = region["baseline_precip_mm"]
+            month = datetime.strptime(date, "%Y-%m-%d").month
+
+            # Calculate anomaly
+            precip_anomaly = monthly_precip - baseline
+            precip_anomaly_pct = (monthly_precip - baseline) / baseline * 100 if baseline > 0 else 0
+
+            # Determine if in critical growing season
+            is_critical_season = month in region["critical_months"]
+
+            # Determine drought/flood status
+            if precip_anomaly_pct < -40:
+                status = "severe_drought"
+            elif precip_anomaly_pct < -20:
+                status = "drought"
+            elif precip_anomaly_pct < -10:
+                status = "dry"
+            elif precip_anomaly_pct > 40:
+                status = "flood"
+            elif precip_anomaly_pct > 20:
+                status = "wet"
+            elif precip_anomaly_pct > 10:
+                status = "slightly_wet"
+            else:
+                status = "normal"
+
+            # Calculate impact score (0-100)
+            if is_critical_season:
+                impact_multiplier = 1.5
+            else:
+                impact_multiplier = 0.7
+
+            impact_score = min(100, abs(precip_anomaly_pct) * impact_multiplier)
+
+            return {
+                "region_id": region_id,
+                "region_name": region["name"],
+                "region_type": region["type"],
+                "country": region["country"],
+                "date": date,
+                "month": month,
+                "daily_precip_mm": round(daily_precip, 2),
+                "monthly_precip_estimate_mm": round(monthly_precip, 1),
+                "baseline_precip_mm": baseline,
+                "precip_anomaly_mm": round(precip_anomaly, 1),
+                "precip_anomaly_pct": round(precip_anomaly_pct, 2),
+                "status": status,
+                "is_critical_season": is_critical_season,
+                "impact_score": round(impact_score, 1),
+                "crops": region["crops"],
+                "data_source": "GPM_IMERG_REAL",
+                "satellites": ["GPM", "IMERG"],
+                "quality": "good",
+                "days_averaged": result.get("days_averaged", 7)
+            }
+
+        except ImportError as e:
+            logger.warning(f"satellite_data module not available: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to fetch real precipitation data: {e}")
+            return None
+
+    def _fetch_simulated_precipitation(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
+        """
+        Fetch simulated precipitation data for testing and development.
+
+        Args:
+            region_id: Region identifier
+            region: Region configuration dictionary
+            date: Date string (YYYY-MM-DD)
+
+        Returns:
+            Dictionary with precipitation metrics
+        """
         # Simulate realistic precipitation data
         # In production: use NASA GES DISC API for GPM/IMERG data
         np.random.seed(hash(date + region_id) % 2**32)
-        
+
         # Get baseline precipitation
         baseline = region["baseline_precip_mm"]
-        
+
         # Add seasonal variation
         month = datetime.strptime(date, "%Y-%m-%d").month
         day_of_year = datetime.strptime(date, "%Y-%m-%d").timetuple().tm_yday
-        
+
         # Determine if in critical growing season
         is_critical_season = month in region["critical_months"]
-        
+
         # Seasonal factor (varies by region and hemisphere)
         if region_id in ["australia_wheat"]:
             # Southern hemisphere - opposite seasons
@@ -197,24 +324,24 @@ class PrecipitationMonitor:
         else:
             # Northern hemisphere
             seasonal_factor = 1.5 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
-        
+
         # Add weather system variation
         weather_factor = np.random.uniform(0.3, 2.5)
-        
+
         # Random daily variation
         daily_noise = np.random.normal(0, baseline * 0.15)
-        
+
         # Calculate actual precipitation (daily, then monthly estimate)
         daily_precip = (baseline / 30) * (1 + seasonal_factor * 0.3) * weather_factor + daily_noise
         daily_precip = max(0, daily_precip)
-        
+
         # Monthly estimate (extrapolate from daily)
         monthly_precip = daily_precip * 30
-        
+
         # Calculate anomaly
         precip_anomaly = monthly_precip - baseline
         precip_anomaly_pct = (monthly_precip - baseline) / baseline * 100
-        
+
         # Determine drought/flood status
         if precip_anomaly_pct < -40:
             status = "severe_drought"
@@ -230,16 +357,16 @@ class PrecipitationMonitor:
             status = "slightly_wet"
         else:
             status = "normal"
-        
+
         # Calculate impact score (0-100)
         # During critical season, deviations have more impact
         if is_critical_season:
             impact_multiplier = 1.5
         else:
             impact_multiplier = 0.7
-        
+
         impact_score = min(100, abs(precip_anomaly_pct) * impact_multiplier)
-        
+
         return {
             "region_id": region_id,
             "region_name": region["name"],
@@ -256,7 +383,7 @@ class PrecipitationMonitor:
             "is_critical_season": is_critical_season,
             "impact_score": round(impact_score, 1),
             "crops": region["crops"],
-            "data_source": "GPM_IMERG",
+            "data_source": "GPM_IMERG_SIMULATED",
             "satellites": ["GPM", "IMERG"],
             "quality": "good" if np.random.random() > 0.1 else "partial"
         }

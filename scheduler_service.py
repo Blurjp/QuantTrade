@@ -338,6 +338,19 @@ def run_daily_pipeline():
         last_run_status = f"failed: {str(e)[:50]}"
         return
 
+    # Check signals and send notifications
+    logger.info("Checking signals for actionable notifications...")
+    try:
+        from pipeline.notifications import send_notification_on_signals
+        notification_result = send_notification_on_signals(today)
+        logger.info(f"Signal check complete: {notification_result.get('actionable_count', 0)} actionable signals")
+        if notification_result.get('notified'):
+            logger.info(f"Notification sent: {notification_result.get('message', '')}")
+        else:
+            logger.info(f"No notification needed: {notification_result.get('message', '')}")
+    except Exception as e:
+        logger.error(f"Signal notification check failed: {e}")
+
     # Rebuild asset history
     try:
         from scripts.rebuild_asset_history import rebuild_asset_history

@@ -169,18 +169,31 @@ class NotificationManager:
             if html_body:
                 msg.attach(MIMEText(html_body, "html"))
             
-            # Send email
-            with smtplib.SMTP(self.config.smtp_host, self.config.smtp_port) as server:
-                server.starttls()
-                server.login(self.config.smtp_username, self.config.smtp_password)
-                server.sendmail(
-                    self.config.email_from,
-                    self.config.email_to,
-                    msg.as_string()
-                )
-            
-            logger.info(f"✅ Email sent: {subject}")
-            return True
+            # Send email - try SSL first (port 465), then TLS (port 587)
+            try:
+                # Try SSL (port 465)
+                with smtplib.SMTP_SSL(self.config.smtp_host, self.config.smtp_port, timeout=10) as server:
+                    server.login(self.config.smtp_username, self.config.smtp_password)
+                    server.sendmail(
+                        self.config.email_from,
+                        self.config.email_to,
+                        msg.as_string()
+                    )
+                logger.info(f"✅ Email sent via SSL: {subject}")
+                return True
+            except Exception as ssl_error:
+                # Try TLS (port 587)
+                logger.warning(f"SSL failed, trying TLS: {ssl_error}")
+                with smtplib.SMTP(self.config.smtp_host, 587, timeout=10) as server:
+                    server.starttls()
+                    server.login(self.config.smtp_username, self.config.smtp_password)
+                    server.sendmail(
+                        self.config.email_from,
+                        self.config.email_to,
+                        msg.as_string()
+                    )
+                logger.info(f"✅ Email sent via TLS: {subject}")
+                return True
             
         except Exception as e:
             logger.error(f"Failed to send email: {e}")

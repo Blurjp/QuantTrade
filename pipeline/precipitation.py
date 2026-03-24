@@ -201,6 +201,11 @@ class PrecipitationMonitor:
         Returns:
             Dictionary with precipitation metrics or None if fetch failed
         """
+        # DISABLED: NASA GPM data fetch is causing hangs due to 404 errors
+        # TODO: Re-enable once we fix the fetch logic or NASA data is available
+        logger.debug(f"NASA GPM data fetch disabled - using simulated data")
+        return None
+        
         try:
             from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, is_real_data_available
 

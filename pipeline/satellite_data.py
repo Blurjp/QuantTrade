@@ -564,6 +564,7 @@ class NASAGESDISCFetcher:
         NASA GPM IMERG data has:
         - 3-5 day latency (recent data not available)
         - Only historical data (no future data)
+        - Archive typically goes back to 2000
         """
         try:
             target_date = datetime.strptime(date, "%Y-%m-%d")
@@ -574,8 +575,13 @@ class NASAGESDISCFetcher:
                 return False
             
             # Skip recent dates (NASA has 3-5 day latency)
-            min_available_date = today - timedelta(days=5)
+            min_available_date = today - timedelta(days=7)
             if target_date > min_available_date:
+                return False
+            
+            # Skip very old dates (GPM starts from March 2014)
+            gpm_start = datetime(2014, 3, 1)
+            if target_date < gpm_start:
                 return False
                 
             return True
@@ -630,11 +636,17 @@ class NASAGESDISCFetcher:
             today = datetime.now()
             
             # Skip fetching if target date is in the future or too recent
-            # NASA GPM data has ~3-5 day latency
-            min_available_date = today - timedelta(days=5)
+            # NASA GPM data has ~3-5 day latency, using 7 days for safety
+            min_available_date = today - timedelta(days=7)
             
             if target_date > min_available_date:
                 logger.debug(f"NASA GPM data not yet available for {date} (data has 3-5 day latency)")
+                return None
+            
+            # Also check GPM start date (March 2014)
+            gpm_start = datetime(2014, 3, 1)
+            if target_date < gpm_start:
+                logger.debug(f"NASA GPM data not available before 2014-03-01")
                 return None
             
             # Limit days_range to prevent excessive fetches
@@ -643,8 +655,12 @@ class NASAGESDISCFetcher:
             for day_offset in range(days_range):
                 fetch_date = (target_date - timedelta(days=day_offset))
                 
-                # Skip dates that are too recent
+                # Skip dates that are too recent (7 day buffer for safety)
                 if fetch_date > min_available_date:
+                    continue
+                    
+                # Skip dates before GPM start
+                if fetch_date < gpm_start:
                     continue
                     
                 fetch_date_str = fetch_date.strftime("%Y-%m-%d")

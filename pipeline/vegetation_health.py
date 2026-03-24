@@ -548,54 +548,58 @@ class VegetationHealthMonitor:
         
         if region_type in ["row_crops", "plantation"]:
             # Crop signals
+            # Stress = supply shortage = bullish prices = LONG
             if status in ["severe_stress", "stress"]:
-                direction = "short"
+                direction = "long"
                 confidence = min(100, 60 + current_data["impact_score"] * 0.5)
                 if is_critical:
                     confidence = min(100, confidence * 1.2)
-                rationale = f"Vegetation stress in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Crop yield at risk."
+                rationale = f"Vegetation stress in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Supply at risk, bullish for prices."
             
             elif status == "slight_stress":
                 if is_critical:
-                    direction = "short"
+                    direction = "long"
                     confidence = 60
-                    rationale = f"Slight vegetation stress during critical period. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal."
+                    rationale = f"Slight vegetation stress during critical period. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Mild bullish signal."
                 else:
                     direction = "neutral"
                     confidence = 50
-                    rationale = f"Slight vegetation stress outside critical period. Limited yield impact."
+                    rationale = f"Slight vegetation stress outside critical period. Limited supply impact."
             
+            # Excellent = good supply = bearish prices = SHORT
             elif status == "excellent":
-                direction = "long"
+                direction = "short"
                 confidence = min(100, 60 + abs(current_data["ndvi_anomaly_pct"]) * 0.8)
-                rationale = f"Excellent vegetation health in {region['name']}. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Strong yield potential."
+                rationale = f"Excellent vegetation health in {region['name']}. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Strong supply, bearish for prices."
             
             elif status == "good":
                 if is_critical:
-                    direction = "long"
+                    direction = "short"
                     confidence = 58
-                    rationale = f"Good vegetation conditions during critical period. Favorable for yields."
+                    rationale = f"Good vegetation conditions during critical period. Favorable for yields, mildly bearish."
                 else:
                     direction = "neutral"
                     confidence = 52
-                    rationale = f"Good vegetation conditions. Normal yield expectations."
+                    rationale = f"Good vegetation conditions. Normal supply expectations."
             
             else:  # normal
                 direction = "neutral"
                 confidence = 50
-                rationale = f"Normal vegetation health in {region['name']}. {current_data['ndvi_anomaly_pct']:+.1f}% from baseline. Expected yields."
+                rationale = f"Normal vegetation health in {region['name']}. {current_data['ndvi_anomaly_pct']:+.1f}% from baseline. Expected supply."
         
         elif region_type == "forest":
             # Forestry signals (longer-term, less sensitive)
+            # Stress = supply shortage = bullish = LONG
             if status in ["severe_stress", "stress"]:
-                direction = "short"
-                confidence = min(100, 55 + current_data["impact_score"] * 0.3)
-                rationale = f"Forest stress detected in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Timber/pulp supply concern."
-            
-            elif status == "excellent":
                 direction = "long"
+                confidence = min(100, 55 + current_data["impact_score"] * 0.3)
+                rationale = f"Forest stress detected in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Timber/pulp supply concern, bullish for prices."
+            
+            # Excellent = good supply = bearish = SHORT
+            elif status == "excellent":
+                direction = "short"
                 confidence = 58
-                rationale = f"Excellent forest health. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Sustainable production."
+                rationale = f"Excellent forest health. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Strong supply, bearish for prices."
             
             else:
                 direction = "neutral"
@@ -727,9 +731,9 @@ class VegetationHealthMonitor:
             "region_types": list(set(r["type"] for r in self.regions.values())),
             "regions": self.regions,
             "signal_logic": {
-                "stress": "SHORT crops (yield risk)",
-                "excellent": "LONG crops (high yield potential)",
-                "normal": "NEUTRAL (expected yields)",
+                "stress": "LONG crops (supply shortage = bullish prices)",
+                "excellent": "SHORT crops (good supply = bearish prices)",
+                "normal": "NEUTRAL (expected supply)",
                 "critical_season": "Higher impact during growing season"
             },
             "trading_instruments": list(set(

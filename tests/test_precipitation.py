@@ -164,7 +164,8 @@ class TestPrecipitationMonitor:
 
             signal = monitor.generate_signal("usa_corn_belt", "2026-07-15")
 
-            assert signal["direction"] == "short"
+            # Drought = supply shortage = bullish = LONG
+            assert signal["direction"] == "long"
             assert signal["confidence"] > 50
             assert "drought" in signal["rationale"].lower()
 
@@ -187,7 +188,8 @@ class TestPrecipitationMonitor:
 
             signal = monitor.generate_signal("usa_corn_belt", "2026-07-15")
 
-            assert signal["direction"] == "short"
+            # Flood = supply damage = bullish = LONG
+            assert signal["direction"] == "long"
             assert "flood" in signal["rationale"].lower() or "rain" in signal["rationale"].lower()
 
     def test_generate_signal_normal(self, monitor):
@@ -209,8 +211,8 @@ class TestPrecipitationMonitor:
 
             signal = monitor.generate_signal("usa_corn_belt", "2026-07-15")
 
-            # Normal conditions may be long or neutral depending on logic
-            assert signal["direction"] in ["long", "neutral"]
+            # Normal conditions = good growing conditions = good supply = bearish = SHORT
+            assert signal["direction"] in ["short", "neutral"]
 
     def test_generate_all_signals(self, monitor):
         """Test generating signals for all regions."""

@@ -540,42 +540,46 @@ class PrecipitationMonitor:
         status = current_data["status"]
         is_critical = current_data["is_critical_season"]
         
+        # Drought/dry = supply shortage = bullish prices = LONG
         if status in ["severe_drought", "drought"]:
-            direction = "short"
+            direction = "long"
             confidence = min(100, 60 + current_data["impact_score"] * 0.5)
             if is_critical:
                 confidence = min(100, confidence * 1.2)
-            rationale = f"Drought conditions in {region['name']}. Precipitation {current_data['precip_anomaly_pct']:.1f}% below normal. Crop yield at risk."
+            rationale = f"Drought conditions in {region['name']}. Precipitation {current_data['precip_anomaly_pct']:.1f}% below normal. Supply at risk, bullish for prices."
         
         elif status == "dry":
             if is_critical:
-                direction = "short"
+                direction = "long"
                 confidence = 60
-                rationale = f"Dry conditions during critical growing season. Precipitation {current_data['precip_anomaly_pct']:.1f}% below normal."
+                rationale = f"Dry conditions during critical growing season. Precipitation {current_data['precip_anomaly_pct']:.1f}% below normal. Mild bullish signal."
             else:
                 direction = "neutral"
                 confidence = 50
-                rationale = f"Dry conditions outside critical season. Limited crop impact."
+                rationale = f"Dry conditions outside critical season. Limited supply impact."
         
+        # Flood/wet = supply damage = bullish prices = LONG
         elif status in ["flood", "wet"]:
-            direction = "short"
+            direction = "long"
             confidence = min(100, 55 + current_data["impact_score"] * 0.4)
-            rationale = f"Excessive rainfall in {region['name']}. Precipitation +{abs(current_data['precip_anomaly_pct']):.1f}% above normal. Flood damage risk."
+            rationale = f"Excessive rainfall in {region['name']}. Precipitation +{abs(current_data['precip_anomaly_pct']):.1f}% above normal. Supply damage risk, bullish for prices."
         
+        # Slightly wet = good growing conditions = good supply = bearish = SHORT
         elif status == "slightly_wet":
             if is_critical:
-                direction = "long"
+                direction = "short"
                 confidence = 55
-                rationale = f"Adequate rainfall during growing season. Favorable for crop development."
+                rationale = f"Good rainfall during growing season. Favorable for crop development, mildly bearish."
             else:
                 direction = "neutral"
                 confidence = 50
-                rationale = f"Slightly wet conditions. Normal crop development expected."
+                rationale = f"Slightly wet conditions. Normal supply expectations."
         
+        # Normal = good growing conditions = good supply = bearish = SHORT
         else:  # normal
-            direction = "long"
+            direction = "short"
             confidence = 55
-            rationale = f"Normal precipitation levels in {region['name']}. {current_data['precip_anomaly_pct']:+.1f}% from baseline. Good growing conditions."
+            rationale = f"Normal precipitation levels in {region['name']}. {current_data['precip_anomaly_pct']:+.1f}% from baseline. Good growing conditions, bearish for prices."
         
         signal = {
             "region_id": region_id,

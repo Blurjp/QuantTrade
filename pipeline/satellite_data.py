@@ -558,6 +558,30 @@ class NASAGESDISCFetcher:
         """Check if NASA GES DISC is available."""
         return self._detector.can_use_nasa_gesdisc
 
+    def _is_date_fetchable(self, date: str) -> bool:
+        """Check if a date is likely to have NASA GPM data available.
+        
+        NASA GPM IMERG data has:
+        - 3-5 day latency (recent data not available)
+        - Only historical data (no future data)
+        """
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d")
+            today = datetime.now()
+            
+            # Skip future dates
+            if target_date > today:
+                return False
+            
+            # Skip recent dates (NASA has 3-5 day latency)
+            min_available_date = today - timedelta(days=5)
+            if target_date > min_available_date:
+                return False
+                
+            return True
+        except:
+            return False
+
     def _build_imerg_url(self, date: str) -> str:
         """Build IMERG data URL for a date."""
         dt = datetime.strptime(date, "%Y-%m-%d")
@@ -579,6 +603,11 @@ class NASAGESDISCFetcher:
         if not self.available:
             return None
 
+        # Check if date is fetchable (not future, not too recent)
+        if not self._is_date_fetchable(date):
+            logger.debug(f"Date {date} not fetchable (future or too recent)")
+            return None
+
         cache_key = self.cache._get_cache_key(
             "precip",
             bbox=tuple(bbox),
@@ -598,19 +627,37 @@ class NASAGESDISCFetcher:
             precip_values = []
 
             target_date = datetime.strptime(date, "%Y-%m-%d")
+            today = datetime.now()
+            
+            # Skip fetching if target date is in the future or too recent
+            # NASA GPM data has ~3-5 day latency
+            min_available_date = today - timedelta(days=5)
+            
+            if target_date > min_available_date:
+                logger.debug(f"NASA GPM data not yet available for {date} (data has 3-5 day latency)")
+                return None
+            
+            # Limit days_range to prevent excessive fetches
+            days_range = min(days_range, 7)
 
             for day_offset in range(days_range):
-                fetch_date = (target_date - timedelta(days=day_offset)).strftime("%Y-%m-%d")
-                url = self._build_imerg_url(fetch_date)
+                fetch_date = (target_date - timedelta(days=day_offset))
+                
+                # Skip dates that are too recent
+                if fetch_date > min_available_date:
+                    continue
+                    
+                fetch_date_str = fetch_date.strftime("%Y-%m-%d")
+                url = self._build_imerg_url(fetch_date_str)
 
                 auth = (self.username, self.password)
                 response = requests.get(url, auth=auth, timeout=60)
 
                 if response.status_code != 200:
                     if response.status_code == 404:
-                        logger.info(f"NASA GPM data not available for {fetch_date} (404) - data may not be published yet")
+                        logger.debug(f"NASA GPM data not available for {fetch_date_str} (404)")
                     else:
-                        logger.warning(f"Failed to fetch NASA GPM data for {fetch_date}: HTTP {response.status_code}")
+                        logger.warning(f"Failed to fetch NASA GPM data for {fetch_date_str}: HTTP {response.status_code}")
                     continue
 
                 with tempfile.NamedTemporaryFile(suffix=".nc4", delete=False) as tmp:

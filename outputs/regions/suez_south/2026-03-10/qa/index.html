@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>QuantTrade QA 2026-03-10</title>
+  <style>
+    body { font-family: Helvetica, Arial, sans-serif; margin: 24px; color: #1f2933; }
+    h1, h2 { margin-bottom: 8px; }
+    .links a { margin-right: 16px; }
+    .table { border-collapse: collapse; width: 100%; margin: 12px 0 24px; }
+    .table th, .table td { border: 1px solid #d2d6dc; padding: 6px 8px; text-align: left; }
+    .previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    figure { margin: 0; border: 1px solid #d2d6dc; padding: 8px; }
+    img { width: 100%; height: auto; display: block; }
+  </style>
+</head>
+<body>
+  <h1>QuantTrade QA: 2026-03-10</h1>
+  <div class="links">
+    <a href="../manifests/manifest.parquet">Manifest</a>
+    <a href="../logs/scene_load_log.parquet">Scene Load Log</a>
+    <a href="../detections/daily_detections.geojson">Detections GeoJSON</a>
+    <a href="../metrics/daily.parquet">Daily Metrics</a>
+  </div>
+  <h2>Daily Metrics</h2>
+  <table border="1" class="dataframe table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>date</th>
+      <th>gc_in</th>
+      <th>gc_out</th>
+      <th>gc_total</th>
+      <th>swt_in</th>
+      <th>swt_out</th>
+      <th>swt_total</th>
+      <th>coverage_score</th>
+      <th>num_scenes</th>
+      <th>loaded_scenes</th>
+      <th>max_scene_gap_hours</th>
+      <th>orbit_summary</th>
+      <th>incidence_angle_min</th>
+      <th>incidence_angle_max</th>
+      <th>incidence_angle_mean</th>
+      <th>num_crossings</th>
+      <th>throughput_index_total</th>
+      <th>throughput_index_in</th>
+      <th>throughput_index_out</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>2026-03-10</td>
+      <td>0</td>
+      <td>0</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>0</td>
+      <td>0</td>
+      <td>None</td>
+      <td></td>
+      <td>None</td>
+      <td>None</td>
+      <td>None</td>
+      <td>0</td>
+      <td>0.0</td>
+      <td>0.0</td>
+      <td>0.0</td>
+    </tr>
+  </tbody>
+</table>
+  <h2>Scene Load Log</h2>
+  <p>No load records.</p>
+  <h2>Detections</h2>
+  <p>No detections.</p>
+  <h2>Scene Previews</h2>
+  <div class="previews"><p>No previews generated.</p></div>
+</body>
+</html>

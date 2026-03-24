@@ -205,7 +205,13 @@ class PrecipitationMonitor:
         # TODO: Re-enable once we fix the fetch logic or NASA data is available
         logger.debug(f"NASA GPM data fetch disabled - using simulated data")
         return None
+
+    def _fetch_real_precipitation_DISABLED(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
+        """
+        [DISABLED] Fetch real precipitation data from NASA GES DISC (GPM/IMERG).
         
+        This function is temporarily disabled to prevent system hangs.
+        """
         try:
             from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, is_real_data_available
 

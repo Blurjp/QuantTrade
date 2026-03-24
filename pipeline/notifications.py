@@ -195,6 +195,57 @@ class SignalNotifier:
             logger.error(f"Failed to send email: {e}")
             return False
 
+    def send_sms(self, signals: List[Dict], date: str) -> bool:
+        """
+        Send SMS notification via email-to-SMS gateway.
+
+        Args:
+            signals: List of actionable signals
+            date: Date string
+
+        Returns:
+            True if sent successfully
+        """
+        if not self.config.sms_gateway:
+            logger.debug("SMS gateway not configured - skipping SMS")
+            return False
+
+        if not self.config.smtp_username or not self.config.smtp_password:
+            logger.warning("SMTP not configured - cannot send SMS")
+            return False
+
+        try:
+            lines = [f"QuantTrade {date}", f"{len(signals)} signals:"]
+
+            for sig in signals[:5]:
+                direction = "LONG" if sig["direction"] == "LONG" else "SHORT" if sig["direction"] == "SHORT" else "FLAT"
+                lines.append(f"- {sig.get('region_id', 'unknown')}: {direction}")
+
+            if len(signals) > 5:
+                lines.append(f"... and {len(signals) - 5} more")
+
+            body = "\n".join(lines)
+
+            msg = MIMEMultipart()
+            msg["Subject"] = f"QuantTrade: {len(signals)} signals"
+            msg["From"] = self.config.from_email
+            msg["To"] = self.config.sms_gateway
+
+            text_part = MIMEText(body, "plain", "utf-8")
+            msg.attach(text_part)
+
+            with smtplib.SMTP(self.config.smtp_server, self.config.smtp_port) as server:
+                server.starttls()
+                server.login(self.config.smtp_username, self.config.smtp_password)
+                server.send_message(msg)
+
+            logger.info(f"SMS sent to {self.config.sms_gateway}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send SMS: {e}")
+            return False
+
     def check_and_notify(self, date: Optional[str] = None) -> Dict:
         """
         Check for actionable signals and send notification if found.
@@ -222,9 +273,14 @@ class SignalNotifier:
             subject = f"🛰️ QuantTrade: {len(signals)} 个可操作信号 ({date})"
             body = self.format_email_body(signals, date)
 
-            if self.send_email(subject, body, attach_summary=True):
+            email_sent = self.send_email(subject, body, attach_summary=True)
+            sms_sent = self.send_sms(signals, date)
+
+            if email_sent or sms_sent:
                 result["notified"] = True
-                result["message"] = f"Sent notification for {len(signals)} signals"
+                result["email_sent"] = email_sent
+                result["sms_sent"] = sms_sent
+                result["message"] = f"Sent notification for {len(signals)} signals (email={email_sent}, sms={sms_sent})"
             else:
                 result["message"] = "Failed to send notification"
         else:

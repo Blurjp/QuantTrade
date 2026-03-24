@@ -78,6 +78,8 @@ class SignalNotifier:
         actionable = []
         for region_id, signal in summary.get("signals", {}).items():
             if signal.get("actionability") == "Actionable":
+                if signal.get("type") == "agriculture_combined" and signal.get("real_data_ratio", 0) < 0.5:
+                    continue
                 actionable.append({
                     "region_id": region_id,
                     "signal": signal.get("signal"),
@@ -85,6 +87,7 @@ class SignalNotifier:
                     "confidence": signal.get("confidence"),
                     "instruments": signal.get("instruments", []),
                     "type": signal.get("type"),
+                    "real_data_ratio": signal.get("real_data_ratio"),
                 })
 
         return actionable

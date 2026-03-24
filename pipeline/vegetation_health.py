@@ -25,6 +25,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _confidence_label(score: float) -> str:
+    if score >= 75:
+        return "High"
+    if score >= 60:
+        return "Medium"
+    return "Low"
+
+
 class VegetationHealthMonitor:
     """Monitor vegetation health for commodity trading signals."""
     
@@ -190,14 +198,17 @@ class VegetationHealthMonitor:
 
         logger.info(f"Fetching NDVI data for {region_id} on {date}")
 
+        fallback_reason = None
+
         # Try real data first (auto-detection)
         real_data = self._fetch_real_ndvi(region_id, date)
         if real_data:
             return real_data
 
         # Fallback to simulated data
+        fallback_reason = "real_data_unavailable"
         logger.info(f"Real data unavailable for {region_id}, falling back to simulated")
-        return self._fetch_simulated_ndvi(region_id, date)
+        return self._fetch_simulated_ndvi(region_id, date, fallback_reason=fallback_reason)
 
     def _fetch_real_ndvi(self, region_id: str, date: str) -> Optional[Dict]:
         """
@@ -289,7 +300,9 @@ class VegetationHealthMonitor:
                 "chlorophyll_content": round(max(0, min(100, ndvi * 100)), 1),
                 "data_source": "Sentinel-2 (Real)",
                 "satellites": ["Sentinel-2A", "Sentinel-2B"],
-                "quality": "good"
+                "quality": "good",
+                "is_real_data": True,
+                "fallback_reason": None,
             }
 
         except ImportError:
@@ -299,7 +312,7 @@ class VegetationHealthMonitor:
             logger.warning(f"Failed to fetch real NDVI data: {e}")
             return None
 
-    def _fetch_simulated_ndvi(self, region_id: str, date: str) -> Optional[Dict]:
+    def _fetch_simulated_ndvi(self, region_id: str, date: str, fallback_reason: str = "simulated_fallback") -> Optional[Dict]:
         """
         Fetch simulated NDVI data (fallback).
 
@@ -403,7 +416,9 @@ class VegetationHealthMonitor:
             "chlorophyll_content": round(chlorophyll, 1),  # Relative
             "data_source": "MODIS_Sentinel2",
             "satellites": ["Terra", "Aqua", "Sentinel-2"],
-            "quality": "good" if np.random.random() > 0.1 else "cloudy"
+            "quality": "good" if np.random.random() > 0.1 else "cloudy",
+            "is_real_data": False,
+            "fallback_reason": fallback_reason,
         }
     
     def calculate_baseline(self, region_id: str, days: int = 90) -> Dict:
@@ -621,6 +636,13 @@ class VegetationHealthMonitor:
                 confidence = 50
                 rationale = f"Vegetation health within normal range."
         
+        confidence = round(confidence, 1)
+        is_real_data = bool(current_data.get("is_real_data", False))
+        confidence_penalty = 0
+        if not is_real_data:
+            confidence = round(max(35.0, confidence * 0.7), 1)
+            confidence_penalty = 30
+
         signal = {
             "region_id": region_id,
             "region_name": region["name"],
@@ -629,7 +651,8 @@ class VegetationHealthMonitor:
             "date": date,
             "signal_type": "vegetation_health",
             "direction": direction,
-            "confidence": round(confidence, 1),
+            "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_ndvi": current_data["ndvi"],
@@ -645,6 +668,9 @@ class VegetationHealthMonitor:
             "data_quality": current_data["quality"],
             "data_source": current_data.get("data_source", "unknown"),
             "satellites": current_data.get("satellites", []),
+            "is_real_data": is_real_data,
+            "fallback_reason": current_data.get("fallback_reason"),
+            "confidence_penalty_pct": confidence_penalty,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -734,7 +760,8 @@ class VegetationHealthMonitor:
                 "stress": "LONG crops (supply shortage = bullish prices)",
                 "excellent": "SHORT crops (good supply = bearish prices)",
                 "normal": "NEUTRAL (expected supply)",
-                "critical_season": "Higher impact during growing season"
+                "critical_season": "Higher impact during growing season",
+                "real_data_penalty": "Simulated fallback reduces confidence and blocks strong actionability"
             },
             "trading_instruments": list(set(
                 inst for region in self.regions.values() 

@@ -165,7 +165,41 @@ class TestVegetationHealthMonitor:
         assert signal is not None
         assert "direction" in signal
         assert "confidence" in signal
+        assert "confidence_label" in signal
         assert signal["direction"] in ["long", "short", "neutral"]
+
+    def test_generate_signal_penalizes_simulated_data(self, monitor):
+        mock_data = {
+            "ndvi": 0.50,
+            "evi": 0.42,
+            "ndvi_anomaly_pct": -15.0,
+            "status": "stress",
+            "is_critical_season": True,
+            "impact_score": 90.0,
+            "quality": "good",
+            "lai_estimate": 3.9,
+            "chlorophyll_content": 50.0,
+            "region_id": "usa_corn_soybeans",
+            "region_name": "US Corn & Soybeans Belt",
+            "region_type": "row_crops",
+            "country": "USA",
+            "date": "2026-07-15",
+            "is_real_data": False,
+            "fallback_reason": "real_data_unavailable",
+        }
+        mock_baseline = {
+            "ndvi": {"mean": 0.65, "std": 0.05},
+            "evi": {"mean": 0.55, "std": 0.04},
+            "anomaly": {"mean": 0.0, "std": 0.1},
+        }
+
+        with patch.object(monitor, 'fetch_ndvi_data', return_value=mock_data):
+            with patch.object(monitor, 'calculate_baseline', return_value=mock_baseline):
+                signal = monitor.generate_signal("usa_corn_soybeans", "2026-07-15")
+
+        assert signal["is_real_data"] is False
+        assert signal["confidence_penalty_pct"] == 30
+        assert signal["confidence"] < 100
 
     def test_generate_signal_saves_file(self, monitor, tmp_path):
         """Test that signal generation saves output file."""

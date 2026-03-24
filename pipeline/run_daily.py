@@ -22,7 +22,7 @@ CONFIDENCE_WEIGHTS = {
     "Medium": 0.6,
     "Low": 0.25,
 }
-DEFAULT_CONFIRMATIONS = 1
+DEFAULT_CONFIRMATIONS = 2
 
 
 def _meta_signal_text(group_config: Dict, direction: str) -> str:
@@ -394,6 +394,21 @@ def run_daily_pipeline(
 
         status = "✅" if result["status"] == "success" else "❌"
         print(f"  Status: {status} {result['status']}")
+
+    try:
+        from pipeline.agriculture_signal import build_agriculture_signals
+
+        agriculture_signals = build_agriculture_signals(target_date, output_base=output_base)
+        for region_id, signal_payload in agriculture_signals.items():
+            persisted_signal, persisted_state = apply_signal_persistence(
+                signal_payload,
+                persistence_state.get(f"region:{region_id}", {}),
+                confirmations_required=int(signal_payload.get("confirmations_required", DEFAULT_CONFIRMATIONS)),
+            )
+            signals[region_id] = persisted_signal
+            next_persistence_state[f"region:{region_id}"] = persisted_state
+    except Exception as e:
+        print(f"Warning: agriculture combined signals failed: {e}")
 
     meta_signals, next_meta_state = build_meta_signals(
         signals,

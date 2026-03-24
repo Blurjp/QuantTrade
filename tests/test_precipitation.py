@@ -214,6 +214,30 @@ class TestPrecipitationMonitor:
             # Normal conditions = good growing conditions = good supply = bearish = SHORT
             assert signal["direction"] in ["short", "neutral"]
 
+    def test_generate_signal_penalizes_simulated_data(self, monitor):
+        with patch.object(monitor, '_fetch_simulated_precipitation') as mock_fetch:
+            mock_fetch.return_value = {
+                "daily_precip_mm": 1.0,
+                "monthly_precip_estimate_mm": 30.0,
+                "baseline_precip_mm": 85.0,
+                "precip_anomaly_mm": -55.0,
+                "precip_anomaly_pct": -64.7,
+                "status": "severe_drought",
+                "is_critical_season": True,
+                "impact_score": 97.0,
+                "crops": ["corn", "soybeans"],
+                "data_source": "GPM_IMERG_SIMULATED",
+                "quality": "good",
+                "is_real_data": False,
+                "fallback_reason": "real_data_unavailable",
+            }
+
+            signal = monitor.generate_signal("usa_corn_belt", "2026-07-15")
+
+            assert signal["is_real_data"] is False
+            assert signal["confidence_penalty_pct"] == 30
+            assert signal["confidence_label"] in ["High", "Medium", "Low"]
+
     def test_generate_all_signals(self, monitor):
         """Test generating signals for all regions."""
         signals = monitor.generate_all_signals("2026-03-15")

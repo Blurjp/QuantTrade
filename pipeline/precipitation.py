@@ -27,6 +27,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _confidence_label(score: float) -> str:
+    if score >= 75:
+        return "High"
+    if score >= 60:
+        return "Medium"
+    return "Low"
+
+
 class PrecipitationMonitor:
     """Monitor precipitation for commodity trading signals."""
     
@@ -179,6 +187,8 @@ class PrecipitationMonitor:
 
         logger.info(f"Fetching precipitation data for {region_id} on {date}")
 
+        fallback_reason = None
+
         # Try real data first, fallback to simulated
         real_data = self._fetch_real_precipitation(region_id, region, date)
         if real_data:
@@ -186,8 +196,9 @@ class PrecipitationMonitor:
             return real_data
 
         # Fallback to simulated data
+        fallback_reason = "real_data_unavailable"
         logger.info(f"NASA GPM data unavailable, using simulated precipitation data for {region_id}")
-        return self._fetch_simulated_precipitation(region_id, region, date)
+        return self._fetch_simulated_precipitation(region_id, region, date, fallback_reason=fallback_reason)
 
     def _fetch_real_precipitation(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
         """
@@ -200,17 +211,6 @@ class PrecipitationMonitor:
 
         Returns:
             Dictionary with precipitation metrics or None if fetch failed
-        """
-        # DISABLED: NASA GPM data fetch is causing hangs due to 404 errors
-        # TODO: Re-enable once we fix the fetch logic or NASA data is available
-        logger.debug(f"NASA GPM data fetch disabled - using simulated data")
-        return None
-
-    def _fetch_real_precipitation_DISABLED(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
-        """
-        [DISABLED] Fetch real precipitation data from NASA GES DISC (GPM/IMERG).
-        
-        This function is temporarily disabled to prevent system hangs.
         """
         try:
             from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, is_real_data_available
@@ -292,7 +292,9 @@ class PrecipitationMonitor:
                 "data_source": "GPM_IMERG_REAL",
                 "satellites": ["GPM", "IMERG"],
                 "quality": "good",
-                "days_averaged": result.get("days_averaged", 7)
+                "days_averaged": result.get("days_averaged", 7),
+                "is_real_data": True,
+                "fallback_reason": None,
             }
 
         except ImportError as e:
@@ -302,7 +304,7 @@ class PrecipitationMonitor:
             logger.error(f"Failed to fetch real precipitation data: {e}")
             return None
 
-    def _fetch_simulated_precipitation(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
+    def _fetch_simulated_precipitation(self, region_id: str, region: Dict, date: str, fallback_reason: str = "simulated_fallback") -> Optional[Dict]:
         """
         Fetch simulated precipitation data for testing and development.
 
@@ -396,7 +398,9 @@ class PrecipitationMonitor:
             "crops": region["crops"],
             "data_source": "GPM_IMERG_SIMULATED",
             "satellites": ["GPM", "IMERG"],
-            "quality": "good" if np.random.random() > 0.1 else "partial"
+            "quality": "good" if np.random.random() > 0.1 else "partial",
+            "is_real_data": False,
+            "fallback_reason": fallback_reason,
         }
     
     def calculate_baseline(self, region_id: str, days: int = 30) -> Dict:
@@ -587,6 +591,13 @@ class PrecipitationMonitor:
             confidence = 55
             rationale = f"Normal precipitation levels in {region['name']}. {current_data['precip_anomaly_pct']:+.1f}% from baseline. Good growing conditions, bearish for prices."
         
+        confidence = round(confidence, 1)
+        is_real_data = bool(current_data.get("is_real_data", False))
+        confidence_penalty = 0
+        if not is_real_data:
+            confidence = round(max(35.0, confidence * 0.7), 1)
+            confidence_penalty = 30
+
         signal = {
             "region_id": region_id,
             "region_name": region["name"],
@@ -595,7 +606,8 @@ class PrecipitationMonitor:
             "date": date,
             "signal_type": "precipitation",
             "direction": direction,
-            "confidence": round(confidence, 1),
+            "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_precip_mm": current_data["monthly_precip_estimate_mm"],
@@ -607,6 +619,11 @@ class PrecipitationMonitor:
             "impact_score": current_data["impact_score"],
             "crops": current_data["crops"],
             "data_quality": current_data["quality"],
+            "is_real_data": is_real_data,
+            "fallback_reason": current_data.get("fallback_reason"),
+            "data_source": current_data.get("data_source", "unknown"),
+            "satellites": current_data.get("satellites", []),
+            "confidence_penalty_pct": confidence_penalty,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -693,10 +710,11 @@ class PrecipitationMonitor:
             "region_types": list(set(r["type"] for r in self.regions.values())),
             "regions": self.regions,
             "signal_logic": {
-                "drought": "SHORT crops (yield risk)",
-                "flood": "SHORT crops (damage risk)",
-                "normal": "LONG crops (good conditions)",
-                "critical_season": "Higher impact during growing season"
+                "drought": "LONG crops (supply shortage = bullish prices)",
+                "flood": "LONG crops (damage risk = bullish prices)",
+                "normal": "SHORT crops (good conditions = bearish prices)",
+                "critical_season": "Higher impact during growing season",
+                "real_data_penalty": "Simulated fallback reduces confidence and blocks strong actionability"
             },
             "trading_instruments": list(set(
                 inst for region in self.regions.values() 

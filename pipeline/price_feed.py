@@ -13,6 +13,11 @@ import json
 from pathlib import Path
 import time
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 # Fallback prices (used when API unavailable)
 # Last updated: 2026-03-09 (from Yahoo Finance)
@@ -46,6 +51,16 @@ DEFAULT_PRICES = {
     "USO": 75.0,
 }
 
+SYMBOL_ALIASES = {
+    "CORN": "Corn",
+    "SOYB": "Soybeans",
+    "WEAT": "Wheat",
+}
+
+
+def _normalize_ticker(ticker: str) -> str:
+    return SYMBOL_ALIASES.get(ticker, ticker)
+
 
 def fetch_price_yahoo(ticker: str) -> Optional[float]:
     """
@@ -55,6 +70,7 @@ def fetch_price_yahoo(ticker: str) -> Optional[float]:
     """
     try:
         import yfinance as yf
+        normalized = _normalize_ticker(ticker)
         
         # Map tickers to Yahoo format
         yahoo_ticker = {
@@ -64,7 +80,7 @@ def fetch_price_yahoo(ticker: str) -> Optional[float]:
             "Corn": "ZC=F",
             "Soybeans": "ZS=F",
             "Wheat": "ZW=F",
-        }.get(ticker, ticker)
+        }.get(normalized, normalized)
         
         stock = yf.Ticker(yahoo_ticker)
         hist = stock.history(period="1d")
@@ -74,8 +90,11 @@ def fetch_price_yahoo(ticker: str) -> Optional[float]:
         
         return None
     
+    except ImportError:
+        logger.debug("yfinance not installed; using fallback price for %s", ticker)
+        return None
     except Exception as e:
-        print(f"Error fetching {ticker} from Yahoo: {e}")
+        logger.warning("Error fetching %s from Yahoo: %s", ticker, e)
         return None
 
 
@@ -154,13 +173,13 @@ def fetch_all_prices(
         
         if price is None:
             # Fall back to default
-            price = DEFAULT_PRICES.get(ticker)
+            price = DEFAULT_PRICES.get(_normalize_ticker(ticker))
         
         if price is not None:
             prices[ticker] = price
         else:
             # Use default if all else fails
-            prices[ticker] = DEFAULT_PRICES.get(ticker, 0)
+            prices[ticker] = DEFAULT_PRICES.get(_normalize_ticker(ticker), 0)
         
         # Rate limiting
         time.sleep(0.1)
@@ -184,7 +203,7 @@ def get_price(ticker: str) -> float:
     price = fetch_price_yahoo(ticker)
     
     if price is None:
-        price = DEFAULT_PRICES.get(ticker, 0)
+        price = DEFAULT_PRICES.get(_normalize_ticker(ticker), 0)
     
     return price
 

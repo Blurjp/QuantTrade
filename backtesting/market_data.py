@@ -7,6 +7,16 @@ from pathlib import Path
 import pandas as pd
 
 
+YAHOO_SYMBOL_MAP = {
+    "WTI": "CL=F",
+    "Brent": "BZ=F",
+    "Natural Gas": "NG=F",
+    "Corn": "ZC=F",
+    "Soybeans": "ZS=F",
+    "Wheat": "ZW=F",
+}
+
+
 def _cache_path(output_base: str, symbol: str) -> Path:
     return Path(output_base) / "market_data" / f"{symbol}.parquet"
 
@@ -29,9 +39,13 @@ def fetch_yahoo_prices(
     if not cached.empty and not refresh:
         return cached
 
-    import yfinance as yf
+    try:
+        import yfinance as yf
+    except ImportError:
+        return pd.DataFrame()
 
-    df = yf.download(symbol, start=start, end=end, auto_adjust=False, progress=False, interval="1d")
+    yahoo_symbol = YAHOO_SYMBOL_MAP.get(symbol, symbol)
+    df = yf.download(yahoo_symbol, start=start, end=end, auto_adjust=False, progress=False, interval="1d")
     if df.empty:
         return pd.DataFrame()
 

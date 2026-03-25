@@ -90,20 +90,26 @@ def backtest_signal(
     end: str,
     output_base: str = "outputs",
     refresh_prices: bool = False,
+    research_mode: bool = False,
 ) -> dict:
     signal_df = build_signal_frame(start=start, end=end, output_base=output_base)
     signal_df = signal_df[signal_df["signal_id"] == signal_id].copy()
     if signal_df.empty:
         raise ValueError(f"No signals generated for {signal_id}")
 
-    signal_df = signal_df[signal_df["actionability"] == "Actionable"].copy()
+    if research_mode:
+        signal_df = signal_df[signal_df["action"] != "FLAT"].copy()
+    else:
+        signal_df = signal_df[signal_df["actionability"] == "Actionable"].copy()
+
     if signal_df.empty:
         return {
             "signal_id": signal_id,
             "symbol": symbol,
             "start": start,
             "end": end,
-            "error": "No actionable signals in range",
+            "mode": "research" if research_mode else "production",
+            "error": "No non-flat research signals in range" if research_mode else "No actionable signals in range",
         }
 
     price_df = _prepare_price_frame(symbol, output_base, start, end, refresh_prices)
@@ -141,7 +147,10 @@ def backtest_signal(
         "symbol": symbol,
         "start": start,
         "end": end,
+        "mode": "research" if research_mode else "production",
         "sample_count": int(len(merged)),
+        "long_count": int((merged["action"] == "LONG").sum()),
+        "short_count": int((merged["action"] == "SHORT").sum()),
         "real_data_coverage_pct": round(float((merged["real_data_ratio"] >= 0.5).mean() * 100), 2),
         "critical_season_pct": round(float(merged["critical_season"].mean() * 100), 2),
         "data_quality_modes": merged["data_quality_mode"].value_counts(dropna=False).to_dict(),
@@ -150,7 +159,8 @@ def backtest_signal(
 
     output_dir = Path(output_base) / "backtest"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / f"{signal_id}_{symbol}_agriculture_backtest.json"
+    suffix = "research" if research_mode else "production"
+    output_file = output_dir / f"{signal_id}_{symbol}_agriculture_backtest_{suffix}.json"
     output_file.write_text(json.dumps(report, indent=2, default=str))
     return report
 
@@ -163,6 +173,7 @@ def main() -> None:
     parser.add_argument("--end", default=datetime.now().strftime("%Y-%m-%d"))
     parser.add_argument("--output-base", default="outputs")
     parser.add_argument("--refresh-prices", action="store_true")
+    parser.add_argument("--research-mode", action="store_true", help="Backtest non-flat raw signals without production actionability filters")
     args = parser.parse_args()
 
     report = backtest_signal(
@@ -172,6 +183,7 @@ def main() -> None:
         end=args.end,
         output_base=args.output_base,
         refresh_prices=args.refresh_prices,
+        research_mode=args.research_mode,
     )
     print(json.dumps(report, indent=2, default=str))
 

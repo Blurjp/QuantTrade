@@ -56,5 +56,8 @@ def fetch_yahoo_prices(
     df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
     cache_path = _cache_path(output_base, symbol)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(cache_path, index=False)
+    try:
+        df.to_parquet(cache_path, index=False)
+    except Exception:
+        pass
     return df

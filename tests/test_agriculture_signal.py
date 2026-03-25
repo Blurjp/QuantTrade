@@ -10,6 +10,7 @@ def test_build_agriculture_signals_long_with_real_data(tmp_path):
         "is_critical_season": True,
         "status": "stress",
         "ndvi_anomaly_pct": -14.0,
+        "direction": "LONG",
     }
     precip_signal = {
         "confidence": 78.0,
@@ -17,6 +18,7 @@ def test_build_agriculture_signals_long_with_real_data(tmp_path):
         "is_critical_season": True,
         "status": "drought",
         "precip_anomaly_pct": -24.0,
+        "direction": "LONG",
     }
 
     with patch("pipeline.agriculture_signal.VegetationHealthMonitor.generate_signal", return_value=veg_signal):
@@ -37,6 +39,7 @@ def test_build_agriculture_signals_ignores_simulated_only(tmp_path):
         "is_critical_season": True,
         "status": "stress",
         "ndvi_anomaly_pct": -12.0,
+        "direction": "LONG",
     }
     precip_signal = {
         "confidence": 50.0,
@@ -44,6 +47,7 @@ def test_build_agriculture_signals_ignores_simulated_only(tmp_path):
         "is_critical_season": True,
         "status": "drought",
         "precip_anomaly_pct": -22.0,
+        "direction": "LONG",
     }
 
     with patch("pipeline.agriculture_signal.VegetationHealthMonitor.generate_signal", return_value=veg_signal):
@@ -53,3 +57,31 @@ def test_build_agriculture_signals_ignores_simulated_only(tmp_path):
     assert signals["agriculture_us_corn_soy"]["trading_action"] == "LONG"
     assert signals["agriculture_us_corn_soy"]["actionability"] == "Ignore"
     assert signals["agriculture_us_corn_soy"]["data_quality_mode"] == "simulated"
+
+
+def test_build_agriculture_signals_requires_component_consensus(tmp_path):
+    from pipeline.agriculture_signal import build_agriculture_signals
+
+    veg_signal = {
+        "confidence": 82.0,
+        "is_real_data": True,
+        "is_critical_season": True,
+        "status": "stress",
+        "ndvi_anomaly_pct": -14.0,
+        "direction": "LONG",
+    }
+    precip_signal = {
+        "confidence": 78.0,
+        "is_real_data": True,
+        "is_critical_season": True,
+        "status": "slightly_wet",
+        "precip_anomaly_pct": 12.0,
+        "direction": "SHORT",
+    }
+
+    with patch("pipeline.agriculture_signal.VegetationHealthMonitor.generate_signal", return_value=veg_signal):
+        with patch("pipeline.agriculture_signal.PrecipitationMonitor.generate_signal", return_value=precip_signal):
+            signals = build_agriculture_signals("2026-07-15", output_base=str(tmp_path))
+
+    assert signals["agriculture_us_corn_soy"]["trading_action"] == "FLAT"
+    assert signals["agriculture_us_corn_soy"]["consensus_direction"] == 0

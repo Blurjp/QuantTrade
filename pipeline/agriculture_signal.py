@@ -19,6 +19,15 @@ def _confidence_label(score: float) -> str:
     return "Low"
 
 
+def _direction_to_vote(direction: str) -> int:
+    normalized = (direction or "").upper()
+    if normalized == "LONG":
+        return 1
+    if normalized == "SHORT":
+        return -1
+    return 0
+
+
 AGRICULTURE_SETUPS = {
     "agriculture_us_corn_soy": {
         "label": "US Corn and Soybeans Combined",
@@ -108,22 +117,28 @@ def build_agriculture_signals(target_date: str, output_base: str = "outputs") ->
         is_critical = bool(veg_signal.get("is_critical_season") and precip_signal.get("is_critical_season"))
         veg_score, veg_reasons = _component_score(veg_signal, "vegetation")
         precip_score, precip_reasons = _component_score(precip_signal, "precipitation")
+        veg_vote = _direction_to_vote(veg_signal.get("direction"))
+        precip_vote = _direction_to_vote(precip_signal.get("direction"))
+        consensus_direction = 0
+        if veg_vote != 0 and veg_vote == precip_vote:
+            consensus_direction = veg_vote
+
         score = veg_score + precip_score
         real_data_ratio = sum(1 for s in (veg_signal, precip_signal) if s.get("is_real_data")) / 2.0
         avg_confidence = (float(veg_signal.get("confidence", 50.0)) + float(precip_signal.get("confidence", 50.0))) / 2.0
 
-        if not is_critical:
+        if not is_critical or consensus_direction == 0 or abs(score) < 3:
             score = 0
 
-        if score >= 2:
+        if score >= 3 and consensus_direction > 0:
             trading_action = "LONG"
-            signal_text = f"{setup['label']} supply stress"
-        elif score <= -2:
+            signal_text = f"{setup['label']} confirmed supply stress"
+        elif score <= -3 and consensus_direction < 0:
             trading_action = "SHORT"
-            signal_text = f"{setup['label']} strong supply"
+            signal_text = f"{setup['label']} confirmed strong supply"
         else:
             trading_action = "FLAT"
-            signal_text = f"{setup['label']} mixed crop conditions"
+            signal_text = f"{setup['label']} no component consensus"
 
         if real_data_ratio == 0:
             avg_confidence = min(avg_confidence, 45.0)
@@ -144,6 +159,7 @@ def build_agriculture_signals(target_date: str, output_base: str = "outputs") ->
             "region_name": setup["label"],
             "meta_group": "agriculture_real_alpha",
             "combined_score": score,
+            "consensus_direction": consensus_direction,
             "critical_season": is_critical,
             "real_data_ratio": real_data_ratio,
             "data_quality_mode": "real" if real_data_ratio == 1.0 else "mixed" if real_data_ratio > 0 else "simulated",

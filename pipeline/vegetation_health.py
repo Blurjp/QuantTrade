@@ -33,6 +33,18 @@ def _confidence_label(score: float) -> str:
     return "Low"
 
 
+def _representative_sample_bbox(bbox: List[float], half_span_deg: float = 0.4) -> List[float]:
+    min_lon, min_lat, max_lon, max_lat = bbox
+    center_lon = (min_lon + max_lon) / 2.0
+    center_lat = (min_lat + max_lat) / 2.0
+    return [
+        max(min_lon, center_lon - half_span_deg),
+        max(min_lat, center_lat - half_span_deg),
+        min(max_lon, center_lon + half_span_deg),
+        min(max_lat, center_lat + half_span_deg),
+    ]
+
+
 class VegetationHealthMonitor:
     """Monitor vegetation health for commodity trading signals."""
     
@@ -224,24 +236,27 @@ class VegetationHealthMonitor:
             Dictionary with NDVI metrics or None if fetch failed
         """
         try:
-            from pipeline.satellite_data import PlanetaryComputerFetcher, is_real_data_available
+            from pipeline.satellite_data import PlanetaryComputerFetcher, get_capabilities
 
-            # Check if real data is available via auto-detection
-            if not is_real_data_available():
-                logger.debug("Real satellite data not available (auto-detected)")
+            caps = get_capabilities()
+            if not caps.get("planetary_computer", {}).get("available", False):
+                logger.debug("Planetary Computer not available for NDVI fetch")
                 return None
 
             region = self.regions[region_id]
             bbox = region["bbox"]
+            sample_bbox = _representative_sample_bbox(bbox)
 
             fetcher = PlanetaryComputerFetcher()
 
-            # Search for Sentinel-2 items with low cloud cover
+            # Search for a very small set of Sentinel-2 items with low cloud cover.
+            # These AOIs are huge, so keep the item count and date window tight.
             items = fetcher.search_items(
                 collection="sentinel2",
-                bbox=bbox,
+                bbox=sample_bbox,
                 date=date,
-                days_range=7,
+                days_range=3,
+                max_items=1,
                 query={"eo:cloud_cover": {"lt": 30}}
             )
 
@@ -250,7 +265,7 @@ class VegetationHealthMonitor:
                 return None
 
             # Load data and compute NDVI
-            ds = fetcher.load_data(items, ["B04", "B08"], bbox=bbox)
+            ds = fetcher.load_data(items, ["B04", "B08"], bbox=sample_bbox, resolution=1000)
             if ds is None:
                 return None
 
@@ -303,6 +318,7 @@ class VegetationHealthMonitor:
                 "quality": "good",
                 "is_real_data": True,
                 "fallback_reason": None,
+                "sample_bbox": sample_bbox,
             }
 
         except ImportError:

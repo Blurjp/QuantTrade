@@ -213,11 +213,11 @@ class PrecipitationMonitor:
             Dictionary with precipitation metrics or None if fetch failed
         """
         try:
-            from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, is_real_data_available
+            from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, get_capabilities
 
-            # Check if real data is available
-            if not is_real_data_available():
-                logger.debug("Real satellite data not available, using simulated data")
+            caps = get_capabilities()
+            if not caps.get("nasa_gesdisc", {}).get("available", False):
+                logger.debug("NASA GES DISC not available for precipitation fetch")
                 return None
 
             cache = DataCache()

@@ -598,6 +598,13 @@ class NASAGESDISCFetcher:
         filename = f"3B-DAY.MS.MRG.3IMERG.{year}{month:02d}{day:02d}-S000000-E235959.V07B.nc4"
         return f"{self.IMERG_BASE_URL}/{year}/{month:02d}/{filename}"
 
+    def _should_abort_after_404(self, target_date: datetime, fetch_date: datetime, today: datetime) -> bool:
+        """Stop retrying nearby dates when the archive for the target window is clearly unavailable."""
+        if fetch_date.year == target_date.year and fetch_date.month == target_date.month:
+            if (today - target_date).days <= 60:
+                return True
+        return False
+
     @retry_with_backoff(max_retries=3, base_delay=2.0)
     def fetch_precipitation(
         self,
@@ -671,7 +678,13 @@ class NASAGESDISCFetcher:
 
                 if response.status_code != 200:
                     if response.status_code == 404:
-                        logger.debug(f"NASA GPM data not available for {fetch_date_str} (404)")
+                        logger.info(f"NASA GPM data not available for {fetch_date_str} (404)")
+                        if self._should_abort_after_404(target_date, fetch_date, today):
+                            logger.info(
+                                "Skipping remaining NASA GPM retries for %s; archive not available for this target window yet",
+                                date,
+                            )
+                            break
                     else:
                         logger.warning(f"Failed to fetch NASA GPM data for {fetch_date_str}: HTTP {response.status_code}")
                     continue

@@ -18,6 +18,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Dict, List, Optional
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class NotificationConfig:
         # Quiet hours (no notifications)
         self.quiet_hours_start = int(os.getenv("QUIET_HOURS_START", "23"))  # 11 PM
         self.quiet_hours_end = int(os.getenv("QUIET_HOURS_END", "7"))  # 7 AM
+        self.notification_timezone = os.getenv("NOTIFICATION_TIMEZONE", "America/New_York")
         
         self._log_status()
     
@@ -77,11 +79,15 @@ class NotificationConfig:
         logger.info(f"Min Confidence: {self.min_confidence}%")
         logger.info(f"Min Impact Score: {self.min_impact_score}")
         logger.info(f"Quiet Hours: {self.quiet_hours_start}:00 - {self.quiet_hours_end}:00")
+        logger.info(f"Notification Timezone: {self.notification_timezone}")
         logger.info("=" * 60)
     
     def is_quiet_hours(self) -> bool:
         """Check if current time is in quiet hours."""
-        hour = datetime.now().hour
+        try:
+            hour = datetime.now(ZoneInfo(self.notification_timezone)).hour
+        except Exception:
+            hour = datetime.now().hour
         if self.quiet_hours_start > self.quiet_hours_end:
             # Spans midnight (e.g., 23:00 - 07:00)
             return hour >= self.quiet_hours_start or hour < self.quiet_hours_end
@@ -123,25 +129,25 @@ class NotificationManager:
         # Check confidence
         confidence = signal.get("confidence", 0)
         if confidence < self.config.min_confidence:
-            logger.debug(f"Signal confidence {confidence}% below threshold {self.config.min_confidence}%")
+            logger.info(f"Signal confidence {confidence}% below threshold {self.config.min_confidence}%")
             return False
         
         # Check impact score if available
         impact_score = signal.get("impact_score", 0)
         if impact_score > 0 and impact_score < self.config.min_impact_score:
-            logger.debug(f"Signal impact {impact_score} below threshold {self.config.min_impact_score}")
+            logger.info(f"Signal impact {impact_score} below threshold {self.config.min_impact_score}")
             return False
         
         # Check quiet hours
         if self.config.is_quiet_hours():
-            logger.debug("Current time is in quiet hours - skipping notification")
+            logger.info("Current time is in quiet hours - skipping notification")
             return False
         
         # Check if already notified for this signal
         signal_id = f"{signal.get('signal_type')}_{signal.get('region_id', signal.get('facility_id', ''))}_{signal.get('date', '')}"
         recent_notifications = [n for n in self.history[-20:] if n.get("signal_id") == signal_id]
         if recent_notifications:
-            logger.debug(f"Already notified for signal {signal_id}")
+            logger.info(f"Already notified for signal {signal_id}")
             return False
         
         return True

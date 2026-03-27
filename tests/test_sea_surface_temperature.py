@@ -47,23 +47,22 @@ class TestSeaSurfaceTemperatureMonitor:
         assert summary["total_regions"] == len(monitor.regions)
         assert len(summary["trading_instruments"]) > 0
 
-    def test_fetch_simulated_sst(self, monitor):
-        """Test simulated SST data fetching."""
-        data = monitor._fetch_simulated_sst("nino34", "2026-03-15")
+    def test_fetch_sst_data(self, monitor):
+        """Test SST data fetching."""
+        data = monitor.fetch_sst_data("nino34", "2024-03-15")
 
         assert data is not None
         assert "sst_celsius" in data
         assert "sst_anomaly" in data
         assert "baseline_sst" in data
         assert "enso_state" in data
-        assert 10 <= data["sst_celsius"] <= 35  # Reasonable SST range
+        assert 10 <= data["sst_celsius"] <= 35
 
-    def test_fetch_simulated_sst_different_seasons(self, monitor):
+    def test_fetch_sst_data_different_seasons(self, monitor):
         """Test that different seasons produce different SST."""
-        summer_data = monitor._fetch_simulated_sst("nino34", "2026-07-15")
-        winter_data = monitor._fetch_simulated_sst("nino34", "2026-01-15")
+        summer_data = monitor.fetch_sst_data("nino34", "2024-07-15")
+        winter_data = monitor.fetch_sst_data("nino34", "2024-01-15")
 
-        # Different seasons should have different SST (seasonal variation)
         assert summer_data["sst_celsius"] != winter_data["sst_celsius"]
 
     def test_fetch_sst_unknown_region(self, monitor):
@@ -74,8 +73,7 @@ class TestSeaSurfaceTemperatureMonitor:
 
     def test_enso_state_detection(self, monitor):
         """Test ENSO state detection logic."""
-        # The ENSO state depends on SST anomaly relative to threshold
-        data = monitor._fetch_simulated_sst("nino34", "2026-03-15")
+        data = monitor.fetch_sst_data("nino34", "2024-03-15")
 
         assert data["enso_state"] in ["el_nino", "la_nina", "neutral"]
 

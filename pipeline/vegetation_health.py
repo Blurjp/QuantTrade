@@ -239,8 +239,10 @@ class VegetationHealthMonitor:
             from pipeline.satellite_data import PlanetaryComputerFetcher, get_capabilities
 
             caps = get_capabilities()
-            if not caps.get("planetary_computer", {}).get("available", False):
-                logger.debug("Planetary Computer not available for NDVI fetch")
+            pc_available = caps.get("planetary_computer", {}).get("available", False)
+            logger.info(f"NDVI fetch for {region_id}: PC available={pc_available}")
+            if not pc_available:
+                logger.info("Planetary Computer not available for NDVI fetch")
                 return None
 
             region = self.regions[region_id]
@@ -261,17 +263,21 @@ class VegetationHealthMonitor:
             )
 
             if not items:
-                logger.info(f"No Sentinel-2 items found for {region_id}")
+                logger.info(f"No Sentinel-2 items found for {region_id} on {date}")
                 return None
+
+            logger.info(f"Found {len(items)} Sentinel-2 items for {region_id}")
 
             # Load data and compute NDVI
             ds = fetcher.load_data(items, ["B04", "B08"], bbox=sample_bbox, resolution=1000)
             if ds is None:
+                logger.warning(f"Failed to load Sentinel-2 data for {region_id}")
                 return None
 
             stats = fetcher.compute_band_statistics(ds, "", compute_ndvi=True)
 
             if "ndvi_mean" not in stats:
+                logger.warning(f"No NDVI stats computed for {region_id}")
                 return None
 
             ndvi = stats["ndvi_mean"]
@@ -321,11 +327,11 @@ class VegetationHealthMonitor:
                 "sample_bbox": sample_bbox,
             }
 
-        except ImportError:
-            logger.warning("satellite_data module not available")
+        except ImportError as e:
+            logger.warning(f"satellite_data module not available for NDVI: {e}")
             return None
         except Exception as e:
-            logger.warning(f"Failed to fetch real NDVI data: {e}")
+            logger.warning(f"Failed to fetch real NDVI data for {region_id}: {type(e).__name__}: {e}")
             return None
 
     def _fetch_simulated_ndvi(self, region_id: str, date: str, fallback_reason: str = "simulated_fallback") -> Optional[Dict]:

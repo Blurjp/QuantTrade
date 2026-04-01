@@ -64,3 +64,4 @@ requests>=2.32.0
 # Optional: backtesting (later stage)
 # backtrader
 opencv-python-headless>=4.5.0
+earthaccess>=0.14.0

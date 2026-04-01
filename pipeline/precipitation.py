@@ -203,24 +203,7 @@ class PrecipitationMonitor:
     def _fetch_real_precipitation(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
         """
         Fetch real precipitation data from NASA GES DISC (GPM/IMERG).
-        DISABLED: NASA GPM fetch causes service hangs - returns None immediately.
-        """
-        # DISABLED: NASA GPM fetch causes service to hang
-        # TODO: Re-enable when NASA data fetch is properly fixed
-        logger.debug(f"NASA GPM fetch disabled for {region_id}")
-        return None
-        
-    def _fetch_real_precipitation_original(self, region_id: str, region: Dict, date: str) -> Optional[Dict]:
-        """
-        [ORIGINAL - DISABLED] Fetch real precipitation data from NASA GES DISC (GPM/IMERG).
-
-        Args:
-            region_id: Region identifier
-            region: Region configuration dictionary
-            date: Date string (YYYY-MM-DD)
-
-        Returns:
-            Dictionary with precipitation metrics or None if fetch failed
+        Uses earthaccess library for proper OAuth authentication.
         """
         try:
             from pipeline.satellite_data import NASAGESDISCFetcher, DataCache, get_capabilities

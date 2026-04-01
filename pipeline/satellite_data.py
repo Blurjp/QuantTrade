@@ -106,10 +106,15 @@ class CapabilityDetector:
         has_requests = self._try_import("requests")
         has_netcdf = self._try_import("netCDF4")
 
-        # Check for credentials
-        username = os.environ.get("NASA_EARTHDATA_USERNAME")
-        password = os.environ.get("NASA_EARTHDATA_PASSWORD")
+        # Check for credentials (support both naming conventions)
+        username = os.environ.get("NASA_EARTHDATA_USERNAME") or os.environ.get("EARTHDATA_USERNAME")
+        password = os.environ.get("NASA_EARTHDATA_PASSWORD") or os.environ.get("EARTHDATA_PASSWORD")
         has_credentials = bool(username and password)
+        
+        # Ensure earthaccess can find credentials
+        if has_credentials:
+            os.environ.setdefault("EARTHDATA_USERNAME", username)
+            os.environ.setdefault("EARTHDATA_PASSWORD", password)
 
         available = has_requests and has_netcdf and has_credentials
 
@@ -612,7 +617,7 @@ class NASAGESDISCFetcher:
         date: str,
         days_range: int = 7
     ) -> Optional[Dict]:
-        """Fetch precipitation data for a region."""
+        """Fetch precipitation data for a region using earthaccess."""
         if not self.available:
             return None
 
@@ -633,83 +638,76 @@ class NASAGESDISCFetcher:
             return cached
 
         try:
-            import requests
+            import earthaccess
             from netCDF4 import Dataset
-            import tempfile
 
-            precip_values = []
+            # Login using environment variables (EARTHDATA_USERNAME/PASSWORD)
+            earthaccess.login(strategy="environment")
 
             target_date = datetime.strptime(date, "%Y-%m-%d")
             today = datetime.now()
             
-            # Skip fetching if target date is in the future or too recent
-            # NASA GPM data has ~3-5 day latency, using 7 days for safety
             min_available_date = today - timedelta(days=7)
-            
             if target_date > min_available_date:
-                logger.debug(f"NASA GPM data not yet available for {date} (data has 3-5 day latency)")
+                logger.debug(f"NASA GPM data not yet available for {date}")
                 return None
             
-            # Also check GPM start date (March 2014)
             gpm_start = datetime(2014, 3, 1)
             if target_date < gpm_start:
-                logger.debug(f"NASA GPM data not available before 2014-03-01")
                 return None
             
-            # Limit days_range to prevent excessive fetches
             days_range = min(days_range, 7)
+            start_date = (target_date - timedelta(days=days_range - 1)).strftime("%Y-%m-%d")
+            end_date = date
 
-            for day_offset in range(days_range):
-                fetch_date = (target_date - timedelta(days=day_offset))
-                
-                # Skip dates that are too recent (7 day buffer for safety)
-                if fetch_date > min_available_date:
+            # Search for granules using earthaccess
+            results = earthaccess.search_data(
+                short_name='GPM_3IMERGDF',
+                version='07',
+                temporal=(start_date, end_date),
+                bounding_box=tuple(bbox)
+            )
+
+            if not results:
+                logger.info(f"No NASA GPM granules found for {start_date} to {end_date}")
+                return None
+
+            logger.info(f"Found {len(results)} NASA GPM granules")
+
+            # Download granules
+            downloaded = earthaccess.download(results, "/tmp/gpm_data")
+            
+            precip_values = []
+            
+            for local_path in downloaded:
+                if not local_path or not Path(local_path).exists():
                     continue
-                    
-                # Skip dates before GPM start
-                if fetch_date < gpm_start:
-                    continue
-                    
-                fetch_date_str = fetch_date.strftime("%Y-%m-%d")
-                url = self._build_imerg_url(fetch_date_str)
-
-                auth = (self.username, self.password)
-                response = requests.get(url, auth=auth, timeout=60)
-
-                if response.status_code != 200:
-                    if response.status_code == 404:
-                        logger.info(f"NASA GPM data not available for {fetch_date_str} (404)")
-                        if self._should_abort_after_404(target_date, fetch_date, today):
-                            logger.info(
-                                "Skipping remaining NASA GPM retries for %s; archive not available for this target window yet",
-                                date,
-                            )
-                            break
-                    else:
-                        logger.warning(f"Failed to fetch NASA GPM data for {fetch_date_str}: HTTP {response.status_code}")
-                    continue
-
-                with tempfile.NamedTemporaryFile(suffix=".nc4", delete=False) as tmp:
-                    tmp.write(response.content)
-                    tmp_path = tmp.name
-
                 try:
-                    with Dataset(tmp_path) as nc:
-                        precip = nc.variables["precipitationCal"][:]
+                    with Dataset(str(local_path)) as nc:
+                        # GPM IMERG v07 uses "precipitation" (not "precipitationCal")
+                        precip_var = "precipitation" if "precipitation" in nc.variables else "precipitationCal"
+                        precip = nc.variables[precip_var][:]
                         lats = nc.variables["lat"][:]
                         lons = nc.variables["lon"][:]
 
                         west, south, east, north = bbox
-
                         lat_mask = (lats >= south) & (lats <= north)
                         lon_mask = (lons >= west) & (lons <= east)
 
-                        precip_region = precip[lat_mask, :][:, lon_mask]
+                        # Handle both (time, lon, lat) and (lat, lon) dimensions
+                        if precip.ndim == 3:
+                            precip_region = precip[0, lon_mask, :][:, lat_mask]
+                        else:
+                            precip_region = precip[lat_mask, :][:, lon_mask]
                         daily_mean = float(np.nanmean(precip_region)) * 24
                         precip_values.append(daily_mean)
-
+                except Exception as e:
+                    logger.warning(f"Failed to read GPM data file: {e}")
                 finally:
-                    os.unlink(tmp_path)
+                    try:
+                        Path(local_path).unlink(missing_ok=True)
+                    except:
+                        pass
 
             if not precip_values:
                 return None

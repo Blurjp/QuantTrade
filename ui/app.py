@@ -1452,9 +1452,27 @@ def _render_portfolio_monitor(st):
         with action_col2:
             st.caption("如果组合文件或历史价格修正了，可以点这里重新生成资产曲线。")
         
-        # Load asset history
-        tracker_path = PROJECT_ROOT / "outputs" / "asset_history.json"
-        if not tracker_path.exists():
+        # Load asset history - try scheduler API first, then local file
+        history = None
+        
+        # Try scheduler API
+        api_data = _fetch_from_scheduler("/api/outputs/asset_history.json")
+        if api_data and isinstance(api_data, dict) and api_data.get("daily_assets"):
+            history = api_data
+        elif api_data and isinstance(api_data, list) and len(api_data) > 0:
+            history = api_data
+        
+        # Fallback to local file
+        if history is None:
+            tracker_path = PROJECT_ROOT / "outputs" / "asset_history.json"
+            if tracker_path.exists():
+                try:
+                    history = json.loads(tracker_path.read_text())
+                except json.JSONDecodeError as e:
+                    st.warning(f"无法解析资产历史文件: {e}")
+                    return
+        
+        if history is None:
             st.info("暂无资产历史数据。运行 pipeline 后会自动记录。")
             return
         
@@ -1599,6 +1617,12 @@ def main():
 
     if not use_backend:
         days = list_available_days(output_base, selected_region)
+
+    # Also try scheduler API for days if local is empty
+    if not days:
+        api_dates = _fetch_from_scheduler("/api/dates")
+        if api_dates and api_dates.get("dates"):
+            days = api_dates["dates"]
 
     if not days:
         st.warning("No completed day runs found. Run `python -m pipeline.run --date YYYY-MM-DD` first.")

@@ -120,6 +120,34 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             dates = self._list_available_dates()
             self._send_json({"dates": dates})
 
+        elif self.path.startswith("/api/outputs/"):
+            # Serve any file from outputs/ directory
+            from urllib.parse import unquote
+            rel_path = unquote(self.path[len("/api/outputs/"):])
+            file_path = Path(OUTPUT_BASE) / rel_path
+            if file_path.exists() and file_path.is_file():
+                try:
+                    content = file_path.read_text()
+                    import json as _json
+                    if rel_path.endswith(".json"):
+                        self._send_json(_json.loads(content))
+                    else:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/plain")
+                        self.end_headers()
+                        self.wfile.write(content.encode())
+                except Exception as e:
+                    self._send_json({"error": str(e)}, 500)
+            else:
+                self._send_json({"error": "File not found", "path": rel_path}, 404)
+
+        elif self.path == "/api/outputs-list":
+            # List all files in outputs/ directory
+            import glob as _glob
+            output_path = Path(OUTPUT_BASE)
+            files = [str(f.relative_to(output_path)) for f in output_path.rglob("*") if f.is_file()]
+            self._send_json({"files": files[:500]})  # Limit to 500 files
+
         elif self.path == "/debug/cwd":
             import os as _os
             self._send_json({"cwd": _os.getcwd(), "output_base": OUTPUT_BASE})

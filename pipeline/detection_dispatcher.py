@@ -8,8 +8,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import json
+import logging
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def run_detection(
@@ -89,6 +92,12 @@ def _run_agriculture_detection(
         if mapped_region in monitor.regions:
             data = monitor.fetch_ndvi_data(mapped_region, target_date)
             if data:
+                data_source = data.get("data_source", "unknown")
+                is_real = data.get("is_real_data", False)
+                if not is_real:
+                    logger.warning(f"Using SIMULATED data for {region_id} (source: {data_source})")
+                else:
+                    logger.info(f"Using REAL data for {region_id} from {data_source}")
                 return {
                     "date": target_date,
                     "type": "agriculture",
@@ -96,15 +105,20 @@ def _run_agriculture_detection(
                     "region": region_id,
                     "count": 1,
                     "details": [data],
-                    "metadata": {"status": "success", "data_source": data.get("data_source", "unknown")},
+                    "metadata": {"status": "success", "data_source": data_source},
+                    "is_real_data": is_real,
                 }
 
         # Fallback: return simulated/placeholder data
+        logger.warning(f"Using SIMULATED data for {region_id} - signals may be inaccurate")
         return _get_placeholder_agriculture_data(target_date, region_id)
 
-    except ImportError:
+    except ImportError as e:
+        logger.warning(f"Failed to import vegetation_health module: {e}")
+        logger.warning("Falling back to SIMULATED data - Install satellite data packages for real signals")
         return _get_placeholder_agriculture_data(target_date, Path(aoi_path).stem)
     except Exception as e:
+        logger.error(f"Unexpected error in agriculture detection: {e}")
         return {
             "date": target_date,
             "type": "agriculture",
@@ -172,18 +186,20 @@ def _run_chokepoint_detection(
     region_id = Path(aoi_path).stem.replace("aoi_", "")
 
     # Placeholder for now - would integrate with ship detection
+    logger.info(f"Chokepoint detection for {region_id} on {target_date} (simulated)")
     return {
         "date": target_date,
         "type": "chokepoint",
         "status": "simulated",
         "region": region_id,
-        "count": 15,  # Placeholder vessel count
+        "count": 15,
         "details": [{
             "date": target_date,
             "detections": 15,
             "throughput_index": 0.75,
         }],
         "metadata": {"status": "success", "note": "Simulated data"},
+        "is_real_data": False,
     }
 
 
@@ -207,6 +223,8 @@ def _get_placeholder_agriculture_data(target_date: str, region_id: str) -> Dict[
     """Generate placeholder agriculture data for testing."""
     import numpy as np
 
+    logger.warning(f"Generating placeholder agriculture data for {region_id} on {target_date}")
+
     np.random.seed(hash(target_date + region_id) % 2**32)
 
     # Simulate NDVI
@@ -227,12 +245,15 @@ def _get_placeholder_agriculture_data(target_date: str, region_id: str) -> Dict[
             "valid_pixels": 10000,
         }],
         "metadata": {"status": "success", "note": "Simulated data", "data_source": "placeholder"},
+        "is_real_data": False,
     }
 
 
 def _get_placeholder_storage_data(target_date: str, region_id: str) -> Dict[str, Any]:
     """Generate placeholder storage data for testing."""
     import numpy as np
+
+    logger.warning(f"Generating placeholder storage data for {region_id} on {target_date}")
 
     np.random.seed(hash(target_date + region_id) % 2**32)
 
@@ -251,12 +272,15 @@ def _get_placeholder_storage_data(target_date: str, region_id: str) -> Dict[str,
             "tanks_detected": 100,
         }],
         "metadata": {"status": "success", "note": "Simulated data"},
+        "is_real_data": False,
     }
 
 
 def _get_placeholder_auto_inventory_data(target_date: str, region_id: str) -> Dict[str, Any]:
     """Generate placeholder auto inventory data for testing."""
     import numpy as np
+
+    logger.warning(f"Generating placeholder auto inventory data for {region_id} on {target_date}")
 
     np.random.seed(hash(target_date + region_id) % 2**32)
 
@@ -277,6 +301,7 @@ def _get_placeholder_auto_inventory_data(target_date: str, region_id: str) -> Di
             "valid_pixels": 5000,
         }],
         "metadata": {"status": "success", "note": "Simulated data - using NDVI as inventory proxy"},
+        "is_real_data": False,
     }
 
 

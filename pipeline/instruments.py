@@ -10,7 +10,9 @@ from typing import Dict, List, Optional, Union
 INSTRUMENTS_PATH = Path("configs/instruments.json")
 
 
-def load_instrument_registry(path: Union[str, Path] = INSTRUMENTS_PATH) -> Dict:
+def load_instrument_registry(path: Optional[Union[str, Path]] = None) -> Dict:
+    if path is None:
+        path = INSTRUMENTS_PATH
     with open(path) as f:
         return json.load(f)
 
@@ -19,7 +21,7 @@ def list_region_instruments(
     region_id: str,
     enabled_for_backtest: Optional[bool] = None,
     enabled_for_alerts: Optional[bool] = None,
-    path: Union[str, Path] = INSTRUMENTS_PATH,
+    path: Optional[Union[str, Path]] = None,
 ) -> List[Dict]:
     registry = load_instrument_registry(path)
     instruments = list(registry.get("regions", {}).get(region_id, []))
@@ -41,7 +43,7 @@ def list_region_instruments(
     return instruments
 
 
-def get_primary_instrument(region_id: str, path: Union[str, Path] = INSTRUMENTS_PATH) -> Optional[Dict]:
+def get_primary_instrument(region_id: str, path: Optional[Union[str, Path]] = None) -> Optional[Dict]:
     instruments = list_region_instruments(region_id, path=path)
     for instrument in instruments:
         if instrument.get("primary"):

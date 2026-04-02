@@ -2,6 +2,8 @@
 QA artifact generation for one-day SAR runs.
 """
 
+from __future__ import annotations
+
 import html
 from pathlib import Path
 from typing import Iterable

@@ -2,6 +2,8 @@
 Historical market data loading and caching.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 
 import pandas as pd

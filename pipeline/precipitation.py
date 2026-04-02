@@ -325,21 +325,20 @@ class PrecipitationMonitor:
 
         # Seasonal factor (varies by region and hemisphere)
         if region_id in ["australia_wheat"]:
-            # Southern hemisphere - opposite seasons
             seasonal_factor = 1.5 * np.cos(2 * np.pi * (day_of_year - 15) / 365)
         else:
-            # Northern hemisphere
             seasonal_factor = 1.5 * np.sin(2 * np.pi * (day_of_year - 80) / 365)
 
         # Add weather system variation
-        weather_factor = np.random.uniform(0.3, 2.5)
+        weather_factor = np.random.uniform(0.7, 1.3)
 
-        # Random daily variation
-        daily_noise = np.random.normal(0, baseline * 0.15)
+        # Random daily variation (reduced to preserve seasonal signal)
+        daily_noise = np.random.normal(0, baseline * 0.05)
 
         # Calculate actual precipitation (daily, then monthly estimate)
-        daily_precip = (baseline / 30) * (1 + seasonal_factor * 0.3) * weather_factor + daily_noise
-        daily_precip = max(0, daily_precip)
+        seasonal_precip = (baseline / 30) * (1 + seasonal_factor * 0.4)
+        daily_precip = seasonal_precip * weather_factor + daily_noise
+        daily_precip = max(0.1, daily_precip)
 
         # Monthly estimate (extrapolate from daily)
         monthly_precip = daily_precip * 30

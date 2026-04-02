@@ -86,6 +86,49 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": f"No summary for {date_str}"}, 404)
 
+        elif self.path == "/api/portfolio":
+            # Serve current portfolio state
+            portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
+            if portfolio_file.exists():
+                self._send_json(json.loads(portfolio_file.read_text()))
+            else:
+                self._send_json({"error": "No portfolio file"}, 404)
+
+        elif self.path == "/api/positions":
+            # Serve current positions summary
+            portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
+            if portfolio_file.exists():
+                data = json.loads(portfolio_file.read_text())
+                self._send_json({
+                    "cash": data.get("cash", 0),
+                    "positions": {k: {
+                        "ticker": v.get("ticker"),
+                        "direction": v.get("direction"),
+                        "entry_price": v.get("entry_price"),
+                        "quantity": v.get("quantity"),
+                        "position_value": v.get("position_value"),
+                        "unrealized_pnl": v.get("unrealized_pnl", 0),
+                        "rationale": v.get("rationale", ""),
+                    } for k, v in data.get("positions", {}).items()},
+                    "total_trades": len(data.get("trades", [])),
+                })
+            else:
+                self._send_json({"error": "No portfolio"}, 404)
+
+        elif self.path == "/api/portfolio/upload" and self.command == "POST":
+            # Upload portfolio data from local
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
+            portfolio_file.parent.mkdir(parents=True, exist_ok=True)
+            portfolio_file.write_bytes(body)
+            # Validate JSON
+            try:
+                json.loads(body)
+                self._send_json({"status": "ok", "message": "Portfolio uploaded"})
+            except json.JSONDecodeError:
+                self._send_json({"error": "Invalid JSON"}, 400)
+
         elif self.path == "/api/dates":
             # List available dates
             dates = self._list_available_dates()

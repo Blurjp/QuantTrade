@@ -230,54 +230,91 @@ class AtmosphericMonitor:
 
             bbox = region["bbox"]
 
-            # Fetch NO2 data
-            no2_items = fetcher.search_items(
+            # Sentinel-5P uses a single collection with all gases.
+            # Search once and filter by asset key.
+            all_items = fetcher.search_items(
                 collection="sentinel5p_no2",
                 bbox=bbox,
                 date=date,
                 days_range=7,
-                max_items=5
+                max_items=20
             )
+
             no2_data = None
-            if no2_items:
-                ds = fetcher.load_data(no2_items, ["NO2"], bbox=bbox)
-                if ds is not None:
-                    stats = fetcher.compute_band_statistics(ds, "NO2")
-                    no2_data = stats.get("mean")
-
-            # Fetch SO2 data
-            so2_items = fetcher.search_items(
-                collection="sentinel5p_so2",
-                bbox=bbox,
-                date=date,
-                days_range=7,
-                max_items=5
-            )
             so2_data = None
-            if so2_items:
-                ds = fetcher.load_data(so2_items, ["SO2"], bbox=bbox)
-                if ds is not None:
-                    stats = fetcher.compute_band_statistics(ds, "SO2")
-                    so2_data = stats.get("mean")
-
-            # Fetch CH4 data
-            ch4_items = fetcher.search_items(
-                collection="sentinel5p_ch4",
-                bbox=bbox,
-                date=date,
-                days_range=7,
-                max_items=5
-            )
             ch4_data = None
-            if ch4_items:
-                ds = fetcher.load_data(ch4_items, ["CH4"], bbox=bbox)
-                if ds is not None:
-                    stats = fetcher.compute_band_statistics(ds, "CH4")
-                    ch4_data = stats.get("mean")
+
+            if all_items:
+                import planetary_computer as pc
+                import requests as req
+                import tempfile
+                import netCDF4 as nc4
+
+                # S5P variable mapping: asset_key -> (netcdf_var_substring, unit_conversion)
+                s5p_vars = {
+                    "no2": ("nitrogendioxide_tropospheric_column", 1e6),       # mol/m2 -> μmol/m2
+                    "so2": ("sulfurdioxide_total_vertical_column", 1e6),       # mol/m2 -> μmol/m2
+                    "ch4": ("methane_mixing_ratio_bias_corrected", 1.0),       # ppb (already in ppb)
+                }
+
+                fetched = {"no2": False, "so2": False, "ch4": False}
+
+                for item in all_items:
+                    if all(fetched.values()):
+                        break
+
+                    try:
+                        signed = pc.sign(item)
+                    except Exception:
+                        continue
+
+                    for asset_key, (var_name, scale) in s5p_vars.items():
+                        if fetched[asset_key]:
+                            continue
+                        if asset_key not in signed.assets:
+                            continue
+
+                        try:
+                            href = signed.assets[asset_key].href
+                            r = req.get(href, timeout=60)
+                            if r.status_code != 200:
+                                continue
+
+                            with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+                                tmp.write(r.content)
+                                tmp_path = tmp.name
+
+                            try:
+                                nc = nc4.Dataset(tmp_path)
+                                prod = nc.groups.get("PRODUCT")
+                                if prod is None:
+                                    continue
+                                # Find the variable containing var_name
+                                matching = [v for v in prod.variables if var_name in v.lower()]
+                                if not matching:
+                                    continue
+                                data = prod.variables[matching[0]][:]
+                                mean_val = float(np.nanmean(data)) * scale
+                                if not np.isnan(mean_val) and mean_val > 0:
+                                    if asset_key == "no2":
+                                        no2_data = mean_val
+                                    elif asset_key == "so2":
+                                        so2_data = mean_val
+                                    elif asset_key == "ch4":
+                                        ch4_data = mean_val
+                                fetched[asset_key] = True
+                            finally:
+                                try:
+                                    os.unlink(tmp_path)
+                                except OSError:
+                                    pass
+                        except Exception as e:
+                            logger.debug(f"Failed to read S5P {asset_key}: {e}")
+                            continue
 
             # If we didn't get any data, return None
             if no2_data is None and so2_data is None and ch4_data is None:
-                logger.warning(f"No real atmospheric data available for {region_id}")
+                logger.info(f"No real atmospheric data available for {region_id}")
                 return None
 
             # Use baselines for missing values

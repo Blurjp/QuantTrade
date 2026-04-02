@@ -115,20 +115,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "No portfolio"}, 404)
 
-        elif self.path == "/api/portfolio/upload" and self.command == "POST":
-            # Upload portfolio data from local
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
-            portfolio_file.parent.mkdir(parents=True, exist_ok=True)
-            portfolio_file.write_bytes(body)
-            # Validate JSON
-            try:
-                json.loads(body)
-                self._send_json({"status": "ok", "message": "Portfolio uploaded"})
-            except json.JSONDecodeError:
-                self._send_json({"error": "Invalid JSON"}, 400)
-
         elif self.path == "/api/dates":
             # List available dates
             dates = self._list_available_dates()
@@ -209,6 +195,29 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
         else:
             self._send_json({"error": "Not found"}, 404)
+
+    def do_POST(self):
+        """Handle POST requests."""
+        if self.path == "/api/portfolio/upload":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            try:
+                data = json.loads(body)
+                portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
+                portfolio_file.parent.mkdir(parents=True, exist_ok=True)
+                portfolio_file.write_text(json.dumps(data, indent=2))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "ok", "message": "Portfolio uploaded"}).encode())
+            except json.JSONDecodeError:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Invalid JSON"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def do_HEAD(self):
         self.send_response(200)

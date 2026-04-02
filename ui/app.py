@@ -1291,23 +1291,33 @@ def _render_portfolio_monitor(st):
     
     portfolio_path = PROJECT_ROOT / "outputs" / "paper_trading" / "multi_asset_portfolio.json"
     
-    if not portfolio_path.exists():
-        return
+    # Try loading from scheduler API first, then fallback to local file
+    portfolio = None
     
-    raw_content = portfolio_path.read_text()
+    # Try scheduler API
+    api_data = _fetch_from_scheduler("/api/portfolio")
+    if api_data and "positions" in api_data:
+        portfolio = api_data
     
-    # Handle Git LFS pointer (file not actually pulled)
-    if raw_content.startswith("version https://git-lfs.github.com/spec/v1"):
-        st.warning(
-            "Portfolio file is a Git LFS pointer. Run `git lfs pull` to fetch the actual data, "
-            "or create a new portfolio file."
-        )
-        return
+    # Fallback to local file
+    if portfolio is None and portfolio_path.exists():
+        raw_content = portfolio_path.read_text()
+        
+        # Handle Git LFS pointer
+        if raw_content.startswith("version https://git-lfs.github.com/spec/v1"):
+            st.warning(
+                "Portfolio file is a Git LFS pointer. Run `git lfs pull` to fetch the actual data, "
+                "or create a new portfolio file."
+            )
+            return
+        
+        try:
+            portfolio = json.loads(raw_content)
+        except json.JSONDecodeError as e:
+            st.warning(f"Could not parse portfolio file: {e}")
+            return
     
-    try:
-        portfolio = json.loads(raw_content)
-    except json.JSONDecodeError as e:
-        st.warning(f"Could not parse portfolio file: {e}")
+    if portfolio is None:
         return
     
     positions = portfolio.get("positions", {})
@@ -1554,7 +1564,7 @@ def main():
     _render_portfolio_monitor(st)
 
     output_base = st.sidebar.text_input("Outputs Directory", "outputs")
-    api_base = st.sidebar.text_input("Backend API", "http://127.0.0.1:8000")
+    api_base = st.sidebar.text_input("Backend API", os.environ.get("SCHEDULER_API_URL", "http://127.0.0.1:8000"))
     
     # Auto-refresh control
     st.sidebar.markdown("---")

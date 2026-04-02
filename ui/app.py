@@ -1475,12 +1475,6 @@ def _render_portfolio_monitor(st):
         if history is None:
             st.info("暂无资产历史数据。运行 pipeline 后会自动记录。")
             return
-        
-        try:
-            history = json.loads(tracker_path.read_text())
-        except json.JSONDecodeError as e:
-            st.warning(f"无法解析资产历史文件: {e}")
-            return
 
         # Handle both list and dict formats
         if isinstance(history, list):

@@ -369,10 +369,10 @@ class PlanetaryComputerFetcher:
         "modis_terra": "modis-21A1D-061",
         "modis_aqua": "modis-22A2-061",
         "sentinel3_slstr": "sentinel-3-slstr-l2-lst",
-        "sentinel5p_no2": "sentinel-5p-l2-no2",
-        "sentinel5p_so2": "sentinel-5p-l2-so2",
-        "sentinel5p_co": "sentinel-5p-l2-co",
-        "sentinel5p_ch4": "sentinel-5p-l2-ch4",
+        "sentinel5p_no2": "sentinel-5p-l2-netcdf",
+        "sentinel5p_so2": "sentinel-5p-l2-netcdf",
+        "sentinel5p_co": "sentinel-5p-l2-netcdf",
+        "sentinel5p_ch4": "sentinel-5p-l2-netcdf",
         "viirs": "viirs",
     }
 

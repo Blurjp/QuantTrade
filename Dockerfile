@@ -29,4 +29,6 @@ RUN mkdir -p /app/outputs
 
 EXPOSE 8000
 
-CMD ["python", "scheduler_service.py"]
+# Use SERVICE_TYPE env var to determine what to run (default: scheduler)
+# Set SERVICE_TYPE=web for the Streamlit dashboard
+CMD ["sh", "-c", "if [ \"$SERVICE_TYPE\" = 'web' ]; then streamlit run ui/app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false; else python scheduler_service.py; fi"]

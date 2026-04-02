@@ -356,6 +356,8 @@ def run_daily_pipeline():
         from scripts.rebuild_asset_history import rebuild_asset_history
         rebuild_result = rebuild_asset_history(output_base="outputs", initial_capital=100000.0)
         logger.info(f"Asset history rebuilt: {len(rebuild_result.get('daily_assets', []))} points")
+    except FileNotFoundError:
+        logger.info("Asset history rebuild skipped: portfolio not yet initialized")
     except Exception as e:
         logger.error(f"Asset history rebuild failed: {e}")
 

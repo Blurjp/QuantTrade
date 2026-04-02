@@ -1,5 +1,6 @@
 FROM python:3.11-slim
 
+# Install system dependencies for GDAL/rasterio
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin \
     libgdal-dev \
@@ -9,21 +10,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# Set GDAL environment variables
 ENV GDAL_CONFIG=/usr/bin/gdal-config
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
 ENV C_INCLUDE_PATH=/usr/include/gdal
 
 WORKDIR /app
 
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application
 COPY . .
 
+# Create outputs directory
 RUN mkdir -p /app/outputs
 
-EXPOSE 8080
+EXPOSE 8000
 
-ENV SCHEDULER_API_URL=https://scheduler-production-b60f.up.railway.app
-
-CMD ["streamlit", "run", "ui/app.py", "--server.port", "8080", "--server.address", "0.0.0.0", "--server.headless", "true", "--browser.gatherUsageStats", "false"]
+CMD ["python", "scheduler_service.py"]

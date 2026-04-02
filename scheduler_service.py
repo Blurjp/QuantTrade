@@ -351,6 +351,108 @@ def run_daily_pipeline():
     except Exception as e:
         logger.error(f"Signal notification check failed: {e}")
 
+    # Auto-trade: open positions based on high-confidence signals
+    logger.info("Auto-trading: checking signals for position openings...")
+    try:
+        from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
+        from pipeline.price_feed import get_prices_for_portfolio
+        from pathlib import Path as _Path
+        import json as _json
+
+        portfolio = MultiAssetPortfolio(output_base="outputs")
+
+        # Load latest signals from all modules
+        signals_dir = _Path("outputs")
+        actionable_signals = []
+
+        for signal_file in sorted(signals_dir.rglob("signal_*.json")):
+            try:
+                sig = _json.loads(signal_file.read_text())
+                direction = sig.get("direction", "neutral")
+                confidence = sig.get("confidence", 0)
+                if direction != "neutral" and confidence >= 75:
+                    actionable_signals.append(sig)
+            except Exception:
+                continue
+
+        # Deduplicate: keep highest confidence per region+type
+        best_signals = {}
+        for sig in actionable_signals:
+            key = f"{sig.get('region_id','')}_{sig.get('signal_type','')}"
+            if key not in best_signals or sig.get('confidence', 0) > best_signals[key].get('confidence', 0):
+                best_signals[key] = sig
+
+        # Collect all signal tickers
+        all_signal_tickers = set()
+        for sig in best_signals.values():
+            for inst in sig.get("instruments", []):
+                if isinstance(inst, str):
+                    all_signal_tickers.add(inst)
+
+        # Fetch prices for signal tickers
+        from pipeline.price_feed import fetch_all_prices
+        signal_prices = fetch_all_prices(list(all_signal_tickers))
+        prices = get_prices_for_portfolio(portfolio)
+        prices.update({k: v for k, v in signal_prices.items() if v})
+        trades_made = 0
+
+        # Sort signals by confidence (highest first)
+        sorted_signals = sorted(best_signals.items(), key=lambda x: -x[1].get("confidence", 0))
+
+        for key, sig in sorted_signals:
+            if trades_made >= 3:
+                break  # Max 3 new positions per run
+
+            direction = sig.get("direction", "neutral")
+            instruments = sig.get("instruments", [])
+            if not instruments:
+                continue
+
+            # Pick first available instrument with price
+            ticker = None
+            for inst in instruments:
+                if isinstance(inst, str) and inst in prices and prices[inst]:
+                    ticker = inst
+                    break
+
+            if not ticker:
+                continue
+
+            # Skip if already have a position in this ticker
+            if ticker in portfolio.positions:
+                continue
+
+            price = float(prices[ticker])
+            if price <= 0:
+                continue
+
+            # Calculate position size (5% of portfolio per trade)
+            position_value = portfolio.cash * 0.05
+            if position_value < 500:
+                continue
+
+            try:
+                portfolio.open_position(
+                    ticker=ticker,
+                    direction=direction,
+                    price=price,
+                    value=position_value,
+                    rationale=f"Auto-trade: {sig.get('rationale', '')[:150]}",
+                    asset_class=sig.get("signal_type", "commodity"),
+                )
+                trades_made += 1
+                logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}%)")
+            except Exception as e:
+                logger.warning(f"Auto-trade failed for {ticker}: {e}")
+
+        if trades_made > 0:
+            logger.info(f"Auto-trading complete: {trades_made} positions opened")
+        else:
+            logger.info("Auto-trading: no new positions opened")
+
+    except Exception as e:
+        logger.error(f"Auto-trading failed: {e}")
+
     # Rebuild asset history
     try:
         from scripts.rebuild_asset_history import rebuild_asset_history

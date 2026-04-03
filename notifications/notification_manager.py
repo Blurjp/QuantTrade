@@ -27,14 +27,20 @@ class NotificationConfig:
     """Notification configuration from environment variables."""
     
     def __init__(self):
-        # Email settings (SMTP)
+        # Email settings (SendGrid preferred, SMTP fallback)
         self.email_enabled = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+        self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
+        self.email_from = os.getenv("EMAIL_FROM", "quanttrade@railway.app")
+        self.email_to = os.getenv("EMAIL_TO", "").split(",")
+        
+        # SendGrid settings
+        self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
+        self.sendgrid_from = os.getenv("SENDGRID_FROM", "quanttrade@noreply.com")
+        # SMTP fallback
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_username = os.getenv("SMTP_USERNAME", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.email_from = os.getenv("EMAIL_FROM", "")
-        self.email_to = os.getenv("EMAIL_TO", "").split(",")
         
         # SMS settings (Twilio)
         self.sms_enabled = os.getenv("SMS_ENABLED", "false").lower() == "true"
@@ -65,8 +71,11 @@ class NotificationConfig:
         logger.info("=" * 60)
         logger.info(f"Email: {'✅ Enabled' if self.email_enabled else '❌ Disabled'}")
         if self.email_enabled:
-            logger.info(f"  SMTP: {self.smtp_host}:{self.smtp_port}")
-            logger.info(f"  From: {self.email_from}")
+            if self.sendgrid_api_key:
+                logger.info(f"  Provider: SendGrid")
+            else:
+                logger.info(f"  Provider: SMTP ({self.smtp_host}:{self.smtp_port})")
+            logger.info(f"  From: {self.email_from or self.sendgrid_from}")
             logger.info(f"  To: {len(self.email_to)} recipients")
         
         logger.info(f"SMS: {'✅ Enabled' if self.sms_enabled else '❌ Disabled'}")
@@ -153,7 +162,7 @@ class NotificationManager:
         return True
     
     def send_email(self, subject: str, body: str, html_body: Optional[str] = None) -> bool:
-        """Send email notification."""
+        """Send email notification. Prefers SendGrid, falls back to SMTP."""
         if not self.config.email_enabled:
             logger.debug("Email notifications disabled")
             return False
@@ -162,42 +171,57 @@ class NotificationManager:
             logger.warning("No email recipients configured")
             return False
         
+        # Try SendGrid first
+        if self.config.sendgrid_api_key:
+            try:
+                from sendgrid import SendGridAPIClient
+                from sendgrid.helpers.mail import Mail
+                
+                message = Mail(
+                    from_email=self.config.sendgrid_from,
+                    to_emails=self.config.email_to,
+                    subject=subject,
+                    html_content=html_body or f"<pre>{body}</pre>",
+                )
+                
+                sg = SendGridAPIClient(self.config.sendgrid_api_key)
+                response = sg.send(message)
+                
+                if response.status_code in (200, 201, 202):
+                    logger.info(f"✅ Email sent via SendGrid: {subject}")
+                    return True
+                else:
+                    logger.warning(f"SendGrid returned {response.status_code}, falling back to SMTP")
+                    
+            except ImportError:
+                logger.warning("sendgrid package not installed, falling back to SMTP")
+            except Exception as e:
+                logger.warning(f"SendGrid failed: {e}, falling back to SMTP")
+        
+        # Fallback to SMTP
         try:
             msg = MIMEMultipart("alternative")
             msg["From"] = self.config.email_from
             msg["To"] = ", ".join(self.config.email_to)
             msg["Subject"] = subject
             
-            # Add text body
             msg.attach(MIMEText(body, "plain"))
             
-            # Add HTML body if provided
             if html_body:
                 msg.attach(MIMEText(html_body, "html"))
             
-            # Send email - try SSL first (port 465), then TLS (port 587)
             try:
-                # Try SSL (port 465)
                 with smtplib.SMTP_SSL(self.config.smtp_host, self.config.smtp_port, timeout=10) as server:
                     server.login(self.config.smtp_username, self.config.smtp_password)
-                    server.sendmail(
-                        self.config.email_from,
-                        self.config.email_to,
-                        msg.as_string()
-                    )
+                    server.sendmail(self.config.email_from, self.config.email_to, msg.as_string())
                 logger.info(f"✅ Email sent via SSL: {subject}")
                 return True
             except Exception as ssl_error:
-                # Try TLS (port 587)
                 logger.warning(f"SSL failed, trying TLS: {ssl_error}")
                 with smtplib.SMTP(self.config.smtp_host, 587, timeout=10) as server:
                     server.starttls()
                     server.login(self.config.smtp_username, self.config.smtp_password)
-                    server.sendmail(
-                        self.config.email_from,
-                        self.config.email_to,
-                        msg.as_string()
-                    )
+                    server.sendmail(self.config.email_from, self.config.email_to, msg.as_string())
                 logger.info(f"✅ Email sent via TLS: {subject}")
                 return True
             

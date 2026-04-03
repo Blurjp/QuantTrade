@@ -65,3 +65,7 @@ requests>=2.32.0
 # backtrader
 opencv-python-headless>=4.5.0
 earthaccess>=0.14.0
+sendgrid>=6.10.0
+sendgrid
+sendgrid
+sendgrid>=6.11.0

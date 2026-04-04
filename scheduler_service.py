@@ -522,6 +522,27 @@ def run_daily_pipeline():
                 )
                 trades_made += 1
                 logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}%)")
+                
+                # Send notifications for the new trade
+                try:
+                    from notifications.notification_manager import NotificationManager
+                    nm = NotificationManager()
+                    nm.send_all_signal_alert(
+                        signal={
+                            "signal_type": sig.get("signal_type", "commodity"),
+                            "region": sig.get("region", "global"),
+                            "region_id": sig.get("region_id", ""),
+                            "direction": direction,
+                            "confidence": sig.get("confidence", 0),
+                            "rationale": f"AUTO-TRADE: {direction.upper()} {ticker} @ ${price:.2f} — {sig.get('rationale', '')[:100]}",
+                            "instruments": [ticker],
+                        },
+                        date=datetime.now().strftime("%Y-%m-%d"),
+                    )
+                    logger.info(f"Trade notification sent for {ticker}")
+                except Exception as notif_err:
+                    logger.warning(f"Trade notification failed for {ticker}: {notif_err}")
+                    
             except Exception as e:
                 logger.warning(f"Auto-trade failed for {ticker}: {e}")
 

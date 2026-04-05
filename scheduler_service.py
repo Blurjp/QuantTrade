@@ -221,12 +221,55 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     "traceback": tb.format_exc(),
                 }, 500)
 
+        elif self.path == "/api/signals/history":
+            # Serve signal tracking history
+            try:
+                from tracking.signal_tracker import SignalTracker
+                tracker = SignalTracker(output_base=OUTPUT_BASE)
+                self._send_json({
+                    "stats": tracker.get_stats(),
+                    "history": tracker.get_history(),
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/signals/stats":
+            # Signal accuracy stats only
+            try:
+                from tracking.signal_tracker import SignalTracker
+                tracker = SignalTracker(output_base=OUTPUT_BASE)
+                self._send_json(tracker.get_stats())
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         else:
             self._send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
         """Handle POST requests."""
-        if self.path == "/api/portfolio/upload":
+        if self.path == "/api/discord/command":
+            # Handle Discord bot commands
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            try:
+                data = json.loads(body)
+                command = data.get("command", "")
+                if not command:
+                    self._send_json({"error": "No command provided"}, 400)
+                    return
+
+                from discord_bot.bot import DiscordCommandHandler
+                handler = DiscordCommandHandler(output_base=OUTPUT_BASE)
+                result = handler.handle_command(command)
+
+                # Send response via webhook
+                handler.process_and_respond(command)
+
+                self._send_json({"status": "ok", "result": result})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/portfolio/upload":
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             try:
@@ -381,6 +424,99 @@ def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
     return all_signals
 
 
+def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
+    """
+    Check all open positions against current prices.
+    Auto-close if loss exceeds stop-loss or profit exceeds take-profit.
+    Sends email + Discord notification on close.
+
+    Thresholds configurable via env vars:
+        STOP_LOSS_PCT (default -8)
+        TAKE_PROFIT_PCT (default +15)
+    """
+    stop_loss_pct = float(os.environ.get("STOP_LOSS_PCT", "-8"))
+    take_profit_pct = float(os.environ.get("TAKE_PROFIT_PCT", "15"))
+
+    # Convert to decimal (positive values)
+    sl_threshold = abs(stop_loss_pct) / 100.0
+    tp_threshold = abs(take_profit_pct) / 100.0
+
+    closed_positions = []
+
+    for ticker in list(portfolio.positions.keys()):
+        pos = portfolio.positions[ticker]
+        current_price = prices.get(ticker)
+        if not current_price or current_price <= 0:
+            continue
+
+        # Calculate P&L percentage
+        if pos.direction == "long":
+            pnl_pct = (current_price - pos.entry_price) / pos.entry_price
+        else:
+            pnl_pct = (pos.entry_price - current_price) / pos.entry_price
+
+        reason = None
+        if pnl_pct <= -sl_threshold:
+            reason = f"Stop-loss triggered ({pnl_pct*100:+.1f}% vs -{sl_threshold*100:.0f}% limit)"
+        elif pnl_pct >= tp_threshold:
+            reason = f"Take-profit triggered ({pnl_pct*100:+.1f}% vs +{tp_threshold*100:.0f}% limit)"
+
+        if reason:
+            trade = portfolio.close_position(ticker, current_price, reason)
+            if trade:
+                closed_positions.append((ticker, trade, reason))
+                logger.info(f"AUTO-CLOSE {ticker}: {reason} @ ${current_price:.2f} P&L=${trade.pnl:+.2f}")
+
+                # Track in signal history
+                if signal_tracker:
+                    try:
+                        signal_tracker.record_position_closed(ticker, current_price, trade.pnl)
+                    except Exception:
+                        pass
+
+    # Send notifications for closed positions
+    if closed_positions:
+        try:
+            from notifications.notification_manager import NotificationManager
+            nm = NotificationManager()
+
+            for ticker, trade, reason in closed_positions:
+                pnl_emoji = "+" if trade.pnl >= 0 else ""
+
+                # Email
+                subject = f"Position Closed: {ticker} | P&L: {pnl_emoji}${trade.pnl:.2f}"
+                body = (
+                    f"Position auto-closed: {ticker}\n"
+                    f"Reason: {reason}\n"
+                    f"Exit Price: ${trade.price:.2f}\n"
+                    f"P&L: {pnl_emoji}${trade.pnl:.2f}\n"
+                    f"Quantity: {trade.quantity:.2f}\n"
+                )
+                nm.send_email(subject, body)
+
+                # Discord
+                embed = {
+                    "title": f"Position Closed: {ticker}",
+                    "description": reason,
+                    "color": 3066993 if trade.pnl >= 0 else 15158332,
+                    "fields": [
+                        {"name": "Exit Price", "value": f"${trade.price:.2f}", "inline": True},
+                        {"name": "P&L", "value": f"{pnl_emoji}${trade.pnl:.2f}", "inline": True},
+                        {"name": "Quantity", "value": f"{trade.quantity:.2f}", "inline": True},
+                    ],
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "footer": {"text": "QuantTrade Auto-Close"},
+                }
+                nm.send_discord("", embed)
+
+        except Exception as e:
+            logger.error(f"Close notification failed: {e}")
+
+        logger.info(f"Stop-loss/take-profit: {len(closed_positions)} positions auto-closed")
+    else:
+        logger.info("Stop-loss/take-profit: all positions within limits")
+
+
 def run_daily_pipeline():
     global last_run_time, last_run_status, pipeline_runs
 
@@ -462,6 +598,16 @@ def run_daily_pipeline():
             if key not in best_signals or sig.get('confidence', 0) > best_signals[key].get('confidence', 0):
                 best_signals[key] = sig
 
+        # Track detected signals
+        try:
+            from tracking.signal_tracker import SignalTracker
+            signal_tracker = SignalTracker(output_base="outputs")
+            for sig in best_signals.values():
+                signal_tracker.record_signal_detected(sig)
+        except Exception as track_err:
+            logger.warning(f"Signal tracking (detected) failed: {track_err}")
+            signal_tracker = None
+
         # Collect all signal tickers
         all_signal_tickers = set()
         for sig in best_signals.values():
@@ -475,6 +621,14 @@ def run_daily_pipeline():
         prices = get_prices_for_portfolio(portfolio)
         prices.update({k: v for k, v in signal_prices.items() if v})
         trades_made = 0
+
+        # Initialize risk manager
+        try:
+            from risk.risk_manager import RiskManager
+            risk_mgr = RiskManager()
+        except Exception as risk_err:
+            logger.warning(f"Risk manager init failed: {risk_err}")
+            risk_mgr = None
 
         # Sort signals by confidence (highest first)
         sorted_signals = sorted(best_signals.items(), key=lambda x: -x[1].get("confidence", 0))
@@ -511,6 +665,18 @@ def run_daily_pipeline():
             if position_value < 500:
                 continue
 
+            # Risk management check
+            if risk_mgr:
+                approved, reason = risk_mgr.check_risk(
+                    ticker=ticker,
+                    direction=direction,
+                    position_value=position_value,
+                    portfolio=portfolio,
+                )
+                if not approved:
+                    logger.info(f"Risk check blocked {ticker}: {reason}")
+                    continue
+
             try:
                 portfolio.open_position(
                     ticker=ticker,
@@ -522,27 +688,35 @@ def run_daily_pipeline():
                 )
                 trades_made += 1
                 logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}%)")
-                
+
+                # Track position opened
+                if signal_tracker:
+                    try:
+                        signal_tracker.record_position_opened(sig, ticker, price)
+                    except Exception:
+                        pass
+
                 # Send notifications for the new trade
                 try:
                     from notifications.notification_manager import NotificationManager
                     nm = NotificationManager()
-                    nm.send_all_signal_alert(
+                    nm.notify_signal(
                         signal={
                             "signal_type": sig.get("signal_type", "commodity"),
                             "region": sig.get("region", "global"),
+                            "region_name": sig.get("region", sig.get("region_name", "global")),
                             "region_id": sig.get("region_id", ""),
                             "direction": direction,
                             "confidence": sig.get("confidence", 0),
                             "rationale": f"AUTO-TRADE: {direction.upper()} {ticker} @ ${price:.2f} — {sig.get('rationale', '')[:100]}",
                             "instruments": [ticker],
+                            "date": datetime.now().strftime("%Y-%m-%d"),
                         },
-                        date=datetime.now().strftime("%Y-%m-%d"),
                     )
                     logger.info(f"Trade notification sent for {ticker}")
                 except Exception as notif_err:
                     logger.warning(f"Trade notification failed for {ticker}: {notif_err}")
-                    
+
             except Exception as e:
                 logger.warning(f"Auto-trade failed for {ticker}: {e}")
 
@@ -550,6 +724,22 @@ def run_daily_pipeline():
             logger.info(f"Auto-trading complete: {trades_made} positions opened")
         else:
             logger.info("Auto-trading: no new positions opened")
+
+        # Stop-loss / take-profit check
+        check_stop_loss_take_profit(portfolio, prices, signal_tracker)
+
+        # Daily P&L report (once per day)
+        try:
+            from notifications.daily_report import DailyReportGenerator
+            daily_report = DailyReportGenerator(output_base="outputs")
+            if daily_report.should_send_today():
+                sent = daily_report.generate_and_send(portfolio, prices)
+                if sent:
+                    logger.info("Daily P&L report sent")
+                else:
+                    logger.info("Daily P&L report: send attempted (check notification config)")
+        except Exception as report_err:
+            logger.error(f"Daily report failed: {report_err}")
 
     except Exception as e:
         logger.error(f"Auto-trading failed: {e}")

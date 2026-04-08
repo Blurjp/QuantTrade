@@ -527,11 +527,29 @@ def run_daily_pipeline():
     logger.info(f"Starting pipeline for {today}")
     last_run_time = datetime.now().isoformat()
 
-    # Run satellite monitors (with auto-detected real data)
-    logger.info("Running satellite monitoring modules...")
+    # Run satellite monitors with TIMEOUT to prevent infinite I/O blocking
+    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))  # 5 min default
+    logger.info(f"Running satellite monitoring modules (timeout={PIPELINE_TIMEOUT}s)...")
     try:
-        satellite_signals = run_satellite_monitors(today, "outputs")
-        logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
+        import signal
+
+        class TimeoutError(Exception):
+            pass
+
+        def _timeout_handler(signum, frame):
+            raise TimeoutError(f"Pipeline exceeded {PIPELINE_TIMEOUT}s timeout")
+
+        # Only works in main thread on Unix
+        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(PIPELINE_TIMEOUT)
+        try:
+            satellite_signals = run_satellite_monitors(today, "outputs")
+            signal.alarm(0)  # Cancel alarm
+            logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
+        except TimeoutError:
+            signal.alarm(0)
+            logger.warning(f"Satellite monitoring TIMED OUT after {PIPELINE_TIMEOUT}s, continuing...")
+        signal.signal(signal.SIGALRM, old_handler)
     except Exception as e:
         logger.error(f"Satellite monitoring failed: {e}")
 

@@ -327,10 +327,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def start_health_server(port=8080):
     """Start HTTP server for health checks in a background thread."""
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    from http.server import ThreadingHTTPServer
+    server = ThreadingHTTPServer(("0.0.0.0", port), HealthCheckHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    logger.info(f"Health check server started on port {port}")
+    logger.info(f"Health check server started on port {port} (ThreadingHTTPServer)")
     return server
 
 
@@ -865,7 +866,8 @@ def main():
     def delayed_start():
         time.sleep(5)  # Give health server time to start
         # Ensure backfill data exists before first run
-        ensure_backfill_data("outputs")
+        # Skip backfill on Railway — it blocks I/O and starves the HTTP server
+        # ensure_backfill_data("outputs")
         run_daily_pipeline()
 
     initial_thread = threading.Thread(target=delayed_start, daemon=True)

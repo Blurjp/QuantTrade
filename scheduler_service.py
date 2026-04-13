@@ -528,28 +528,18 @@ def run_daily_pipeline():
     last_run_time = datetime.now().isoformat()
 
     # Run satellite monitors with TIMEOUT to prevent infinite I/O blocking
-    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))  # 5 min default
+    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))
     logger.info(f"Running satellite monitoring modules (timeout={PIPELINE_TIMEOUT}s)...")
     try:
-        import signal
-
-        class TimeoutError(Exception):
-            pass
-
-        def _timeout_handler(signum, frame):
-            raise TimeoutError(f"Pipeline exceeded {PIPELINE_TIMEOUT}s timeout")
-
-        # Only works in main thread on Unix
-        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-        signal.alarm(PIPELINE_TIMEOUT)
-        try:
-            satellite_signals = run_satellite_monitors(today, "outputs")
-            signal.alarm(0)  # Cancel alarm
-            logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
-        except TimeoutError:
-            signal.alarm(0)
-            logger.warning(f"Satellite monitoring TIMED OUT after {PIPELINE_TIMEOUT}s, continuing...")
-        signal.signal(signal.SIGALRM, old_handler)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_satellite_monitors, today, "outputs")
+            try:
+                satellite_signals = future.result(timeout=PIPELINE_TIMEOUT)
+                logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"Satellite monitoring TIMED OUT after {PIPELINE_TIMEOUT}s, continuing...")
+                future.cancel()
     except Exception as e:
         logger.error(f"Satellite monitoring failed: {e}")
 
@@ -881,12 +871,19 @@ def main():
 
     # Run pipeline in background thread after short delay
     # This allows the health check to pass while pipeline runs
+    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))
+
     def delayed_start():
         time.sleep(5)  # Give health server time to start
-        # Ensure backfill data exists before first run
-        # Skip backfill on Railway — it blocks I/O and starves the HTTP server
-        # ensure_backfill_data("outputs")
-        run_daily_pipeline()
+        # Run pipeline with timeout using a separate thread
+        def _run_with_timeout():
+            run_daily_pipeline()
+
+        t = threading.Thread(target=_run_with_timeout, daemon=True)
+        t.start()
+        t.join(timeout=PIPELINE_TIMEOUT)  # Wait max PIPELINE_TIMEOUT seconds
+        if t.is_alive():
+            logger.warning(f"First pipeline run timed out after {PIPELINE_TIMEOUT}s, will retry next cycle")
 
     initial_thread = threading.Thread(target=delayed_start, daemon=True)
     initial_thread.start()

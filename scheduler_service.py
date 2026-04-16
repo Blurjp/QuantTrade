@@ -71,20 +71,57 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
         elif self.path == "/api/all-signals":
             # Aggregate latest signals from all pipeline modules
+            # Maps raw pipeline fields to dashboard-expected format
             all_signals = {}
             output_root = Path(OUTPUT_BASE)
-            # Scan vegetation_health, atmospheric, nighttime_lights, etc.
             for module_dir in output_root.iterdir():
                 if not module_dir.is_dir():
                     continue
-                # Find latest signal per region
-                for sig_file in sorted(module_dir.glob("signal_*_2026-04-*.json")):
+                for sig_file in sorted(module_dir.glob("signal_*_2026-*.json")):
                     try:
                         sig = json.loads(sig_file.read_text())
                         region_id = sig.get("region_id", sig_file.stem)
-                        # Only keep the latest per region
+                        # Only keep latest per region
                         if region_id not in all_signals or sig.get("date", "") > all_signals[region_id].get("date", ""):
-                            all_signals[region_id] = sig
+                            # Map fields to dashboard format
+                            direction = sig.get("direction", "neutral")
+                            conf = sig.get("confidence", 0)
+                            conf_label = sig.get("confidence_label", "")
+                            if not conf_label:
+                                conf_label = "High" if conf >= 70 else "Medium" if conf >= 50 else "Low"
+                            
+                            # Build signal string
+                            signal_str = sig.get("signal", "")
+                            if not signal_str:
+                                if direction == "long":
+                                    signal_str = "Long disruption risk"
+                                elif direction == "short":
+                                    signal_str = "Short disruption risk"
+                                else:
+                                    signal_str = "Normal throughput"
+                            
+                            # Build actionability
+                            actionability = sig.get("actionability", "")
+                            if not actionability:
+                                actionability = "Actionable" if conf >= 70 else "Watchlist" if conf >= 50 else "Ignore"
+                            
+                            mapped = {
+                                "region_id": region_id,
+                                "region_name": sig.get("region_name", region_id),
+                                "date": sig.get("date", ""),
+                                "signal": signal_str,
+                                "direction": direction,
+                                "confidence": conf_label,
+                                "confidence_score": conf,
+                                "actionability": actionability,
+                                "coverage_score": sig.get("coverage_score"),
+                                "signal_strength": sig.get("signal_strength"),
+                                "reroute_flag": sig.get("reroute_flag", False),
+                                "instruments": sig.get("instruments", []),
+                                "rationale": sig.get("rationale", ""),
+                                "signal_type": sig.get("signal_type", module_dir.name),
+                            }
+                            all_signals[region_id] = mapped
                     except:
                         pass
             self._send_json({"date": "latest", "signals": all_signals})

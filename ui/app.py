@@ -314,8 +314,8 @@ def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
             region_info = next((r for r in regions if r["id"] == region_id), {})
             rows.append({
                 "region": region_id,
-                "region_name": region_info.get("name", region_id),
-                "date": api_signals.get("date"),
+                "region_name": sig.get("region_name", region_info.get("name", region_id)),
+                "date": sig.get("date"),
                 "signal": sig.get("signal", "No data"),
                 "confidence": sig.get("confidence", "Unknown"),
                 "actionability": sig.get("actionability", "Ignore"),
@@ -1686,7 +1686,7 @@ def main():
             "reroute_flag": sig.get("reroute_flag", False),
             "actionability": sig.get("actionability", "Ignore"),
             "signal_source": sig.get("type", "unknown"),
-            "rationale": "Signal from scheduler API.",
+            "rationale": sig.get("rationale", "Signal from scheduler API."),
         }
     if trade_signal is None:
         trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")

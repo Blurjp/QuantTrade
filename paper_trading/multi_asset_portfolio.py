@@ -178,12 +178,12 @@ class MultiAssetPortfolio:
                 total += pos.position_value
         return total
     
-    def can_open_position(self, ticker: str, value: float) -> tuple[bool, str]:
+    def can_open_position(self, ticker: str, value: float, direction: str = "long") -> tuple[bool, str]:
         """Check if position can be opened."""
         if len(self.positions) >= self.max_positions:
             return False, "Max positions reached"
         
-        if value > self.cash:
+        if direction != "short" and value > self.cash:
             return False, "Insufficient cash"
         
         if value > self.initial_capital * self.max_position_pct:
@@ -211,7 +211,7 @@ class MultiAssetPortfolio:
         take_profit_pct: float = None,
     ) -> Optional[Trade]:
         """Open a new position."""
-        can_open, reason = self.can_open_position(ticker, value)
+        can_open, reason = self.can_open_position(ticker, value, direction)
         if not can_open:
             print(f"Cannot open position: {reason}")
             return None
@@ -249,7 +249,12 @@ class MultiAssetPortfolio:
         )
         
         self.positions[ticker] = position
-        self.cash -= value
+        if direction == "short":
+            # Short: receive cash from selling borrowed shares
+            self.cash += value
+        else:
+            # Long: pay cash to buy
+            self.cash -= value
         
         # Record trade
         trade = Trade(
@@ -279,8 +284,14 @@ class MultiAssetPortfolio:
         else:  # short
             pnl = pos.quantity * (pos.entry_price - price)
         
-        # Return cash + P&L
-        self.cash += pos.position_value + pnl
+        # Return/release cash based on direction
+        if pos.direction == "short":
+            # Short close: buy back shares (cash out = original proceeds - cost to buy back)
+            # We already received cash when opening, now pay to buy back
+            self.cash += pnl  # pnl already accounts for entry vs exit price
+        else:
+            # Long close: receive back principal + profit
+            self.cash += pos.position_value + pnl
         
         # Record trade
         trade = Trade(

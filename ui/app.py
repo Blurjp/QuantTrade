@@ -311,19 +311,24 @@ def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
     if api_signals and api_signals.get("signals"):
         rows = []
         for region_id, sig in api_signals["signals"].items():
-            region_info = next((r for r in regions if r["id"] == region_id), {})
+            # Filter to only show actionable/watchlist signals to avoid clutter
+            actionability = sig.get("actionability", "Ignore")
             rows.append({
                 "region": region_id,
-                "region_name": sig.get("region_name", region_info.get("name", region_id)),
+                "region_name": sig.get("region_name", region_id),
                 "date": sig.get("date"),
                 "signal": sig.get("signal", "No data"),
+                "direction": sig.get("direction", "neutral"),
                 "confidence": sig.get("confidence", "Unknown"),
-                "actionability": sig.get("actionability", "Ignore"),
+                "confidence_score": sig.get("confidence_score", 0),
+                "actionability": actionability,
                 "coverage_score": sig.get("coverage_score"),
                 "signal_strength": sig.get("signal_strength"),
-                "primary_instrument": (get_primary_instrument(region_id) or {}).get("ticker", "n/a"),
+                "primary_instrument": ",".join(sig.get("instruments", [])[:3]),
                 "run_status": "ok",
                 "reroute_flag": sig.get("reroute_flag", False),
+                "rationale": sig.get("rationale", ""),
+                "signal_type": sig.get("signal_type", ""),
             })
         monitor_df = pd.DataFrame(rows)
     
@@ -334,13 +339,19 @@ def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
         st.info("No regional runs available yet.")
         return
 
-    status_map = {region["id"]: load_region_status(output_base, region["id"]) for region in regions}
-    monitor_df["run_status"] = monitor_df["region"].map(lambda region_id: status_map.get(region_id, {}).get("run_status", "unknown"))
-    monitor_df["last_run_at"] = monitor_df["region"].map(lambda region_id: status_map.get(region_id, {}).get("last_run_at"))
-    monitor_df["region_name"] = monitor_df["region"].map({region["id"]: region["name"] for region in regions})
-    monitor_df["primary_instrument"] = monitor_df["region"].apply(
-        lambda region_id: (get_primary_instrument(region_id) or {}).get("ticker", "n/a")
-    )
+    # Add run_status and region_name from configured regions (for local data)
+    if "run_status" not in monitor_df.columns or monitor_df["run_status"].isna().all():
+        status_map = {region["id"]: load_region_status(output_base, region["id"]) for region in regions}
+        monitor_df["run_status"] = monitor_df["region"].map(lambda region_id: status_map.get(region_id, {}).get("run_status", "unknown"))
+    if "last_run_at" not in monitor_df.columns or monitor_df.get("last_run_at", pd.Series()).isna().all():
+        status_map2 = {region["id"]: load_region_status(output_base, region["id"]) for region in regions}
+        monitor_df["last_run_at"] = monitor_df["region"].map(lambda region_id: status_map2.get(region_id, {}).get("last_run_at"))
+    if "region_name" not in monitor_df.columns:
+        monitor_df["region_name"] = monitor_df["region"].map({region["id"]: region["name"] for region in regions})
+    if "primary_instrument" not in monitor_df.columns:
+        monitor_df["primary_instrument"] = monitor_df["region"].apply(
+            lambda region_id: (get_primary_instrument(region_id) or {}).get("ticker", "n/a")
+        )
     action_rank = {"Actionable": 0, "Watchlist": 1, "Ignore": 2}
     confidence_rank = {"High": 0, "Medium": 1, "Low": 2, "Unknown": 3}
     monitor_df["action_rank"] = monitor_df["actionability"].map(action_rank).fillna(9)
@@ -359,23 +370,30 @@ def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
     cols[2].metric("Ignore", summary["ignore"])
 
     st.markdown("**Global Monitor**")
-    st.caption("Latest regional state ranked by actionability and confidence.")
-    display_df = pd.DataFrame(
-        {
-            "region": monitor_df["region_name"],
-            "latest_day": monitor_df["date"],
-            "run_status": monitor_df["run_status"],
-            "last_run_at": monitor_df["last_run_at"],
-            "actionability": monitor_df["actionability"],
-            "signal": monitor_df["signal"],
-            "confidence": monitor_df["confidence"],
-            "coverage": monitor_df["coverage_score"].apply(_format_pct),
-            "strength": monitor_df["signal_strength"],
-            "primary_ticker": monitor_df["primary_instrument"],
-            "reroute_flag": monitor_df["reroute_flag"],
-        }
-    )
-    st.dataframe(display_df, width="stretch")
+    st.caption("Latest satellite signals ranked by actionability and confidence.")
+    
+    # Add filter
+    show_filter = st.selectbox("Filter", ["All", "Actionable", "Watchlist", "Actionable + Watchlist"], index=3)
+    filtered_df = monitor_df.copy()
+    if show_filter == "Actionable":
+        filtered_df = filtered_df[filtered_df["actionability"] == "Actionable"]
+    elif show_filter == "Watchlist":
+        filtered_df = filtered_df[filtered_df["actionability"] == "Watchlist"]
+    elif show_filter == "Actionable + Watchlist":
+        filtered_df = filtered_df[filtered_df["actionability"].isin(["Actionable", "Watchlist"])]
+    
+    display_cols = {
+        "region": filtered_df["region_name"],
+        "type": filtered_df.get("signal_type", pd.Series([""]*len(filtered_df))),
+        "date": filtered_df["date"],
+        "signal": filtered_df["signal"],
+        "direction": filtered_df.get("direction", pd.Series([""]*len(filtered_df))),
+        "confidence": filtered_df["confidence"],
+        "actionability": filtered_df["actionability"],
+        "instruments": filtered_df.get("primary_instrument", pd.Series([""]*len(filtered_df))),
+    }
+    display_df = pd.DataFrame(display_cols)
+    st.dataframe(display_df, use_container_width=True)
 
 
 def _load_latest_backtests(output_base: str, region_id: str) -> List[Dict]:

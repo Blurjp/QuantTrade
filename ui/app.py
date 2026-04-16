@@ -305,7 +305,31 @@ def _load_remote_bundle(api_base: str, selected_day: str, output_base: str, regi
         "calibration_report": calibration_payload["report"],
     }
 def _render_global_monitor(st, regions: List[Dict], output_base: str) -> None:
-    monitor_df = build_monitor_snapshot(output_base=output_base)
+    # Try scheduler API first (for Railway where web has no local files)
+    monitor_df = pd.DataFrame()
+    api_signals = _fetch_from_scheduler("/api/all-signals")
+    if api_signals and api_signals.get("signals"):
+        rows = []
+        for region_id, sig in api_signals["signals"].items():
+            region_info = next((r for r in regions if r["id"] == region_id), {})
+            rows.append({
+                "region": region_id,
+                "region_name": region_info.get("name", region_id),
+                "date": api_signals.get("date"),
+                "signal": sig.get("signal", "No data"),
+                "confidence": sig.get("confidence", "Unknown"),
+                "actionability": sig.get("actionability", "Ignore"),
+                "coverage_score": sig.get("coverage_score"),
+                "signal_strength": sig.get("signal_strength"),
+                "primary_instrument": (get_primary_instrument(region_id) or {}).get("ticker", "n/a"),
+                "run_status": "ok",
+                "reroute_flag": sig.get("reroute_flag", False),
+            })
+        monitor_df = pd.DataFrame(rows)
+    
+    if monitor_df.empty:
+        monitor_df = build_monitor_snapshot(output_base=output_base)
+    
     if monitor_df.empty:
         st.info("No regional runs available yet.")
         return
@@ -1640,7 +1664,32 @@ def main():
     calibration_df = bundle["calibration_metrics"]
     calibration_report = bundle["calibration_report"]
     metrics_row = metrics_df.iloc[0].to_dict() if len(metrics_df) > 0 else {}
-    trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
+    # Get trade signal - try scheduler API first for Railway deployment
+    api_signals = _fetch_from_scheduler("/api/all-signals")
+    trade_signal = None
+    if api_signals and api_signals.get("signals") and selected_region in api_signals["signals"]:
+        sig = api_signals["signals"][selected_region]
+        trade_signal = {
+            "date": selected_day,
+            "source": "api",
+            "signal": sig.get("signal", "No data"),
+            "bias": _bias_for_signal(sig.get("signal", "No data")),
+            "confidence": sig.get("confidence", "Unknown"),
+            "signal_strength": sig.get("signal_strength"),
+            "coverage_score": sig.get("coverage_score"),
+            "throughput_index_corrected": sig.get("throughput_change"),
+            "baseline_value": sig.get("baseline_value"),
+            "dod_change": sig.get("throughput_change"),
+            "dod_change_pct": sig.get("throughput_change_pct"),
+            "confirmation_days": 0,
+            "zscore": None,
+            "reroute_flag": sig.get("reroute_flag", False),
+            "actionability": sig.get("actionability", "Ignore"),
+            "signal_source": sig.get("type", "unknown"),
+            "rationale": "Signal from scheduler API.",
+        }
+    if trade_signal is None:
+        trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
     region_instruments = list_region_instruments(selected_region)
     trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
     summary_day = _resolve_summary_day(output_base, selected_day)

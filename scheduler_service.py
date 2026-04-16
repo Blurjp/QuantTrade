@@ -69,6 +69,26 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "No summary available"}, 404)
 
+        elif self.path == "/api/all-signals":
+            # Aggregate latest signals from all pipeline modules
+            all_signals = {}
+            output_root = Path(OUTPUT_BASE)
+            # Scan vegetation_health, atmospheric, nighttime_lights, etc.
+            for module_dir in output_root.iterdir():
+                if not module_dir.is_dir():
+                    continue
+                # Find latest signal per region
+                for sig_file in sorted(module_dir.glob("signal_*_2026-04-*.json")):
+                    try:
+                        sig = json.loads(sig_file.read_text())
+                        region_id = sig.get("region_id", sig_file.stem)
+                        # Only keep the latest per region
+                        if region_id not in all_signals or sig.get("date", "") > all_signals[region_id].get("date", ""):
+                            all_signals[region_id] = sig
+                    except:
+                        pass
+            self._send_json({"date": "latest", "signals": all_signals})
+
         elif self.path == "/api/signals":
             # Serve the latest signals
             summary = self._get_latest_summary()

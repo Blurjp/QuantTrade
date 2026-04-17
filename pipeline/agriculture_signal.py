@@ -40,7 +40,7 @@ AGRICULTURE_SETUPS = {
         "label": "US Wheat Combined",
         "vegetation_region": "usa_wheat_plains",
         "precip_region": "usa_winter_wheat",
-        "instruments": ["WEAT", "KWK"],
+        "instruments": ["WEAT", "XOP"],
         "confirmations_required": 2,
     },
 }

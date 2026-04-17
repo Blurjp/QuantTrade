@@ -60,7 +60,7 @@ class SolarIrradianceMonitor:
                 "bbox": [-106.5, 26.0, -93.5, 34.0],
                 "country": "USA",
                 "type": "solar_farm_cluster",
-                "instruments": ["TAN", "FSLR", "NOVA", "XLU"],
+                "instruments": ["TAN", "FSLR", "ENPH", "XLU"],
                 "description": "Fastest growing US solar market",
                 "installed_capacity_gw": 20.0,
                 "baseline_irradiance": 5.2,

@@ -94,7 +94,7 @@ class ThermalInfraredMonitor:
                 "location": "Mon Valley, PA",
                 "type": "steel_production",
                 "bbox": [-80.5, 40.0, -79.5, 40.8],
-                "instruments": ["X", "NUE", "STLD", "AKS"],
+                "instruments": ["NUE", "STLD"],
                 "description": "Major US steel production facilities",
                 "normal_temp_range": [40, 80],  # Hot processes
                 "activity_threshold": 55
@@ -104,7 +104,7 @@ class ThermalInfraredMonitor:
                 "location": "Birmingham, AL",
                 "type": "steel_production",
                 "bbox": [-87.0, 33.3, -86.5, 33.8],
-                "instruments": ["X", "NUE", "STLD"],
+                "instruments": ["NUE", "STLD"],
                 "description": "Southern US steel production",
                 "normal_temp_range": [38, 75],
                 "activity_threshold": 52

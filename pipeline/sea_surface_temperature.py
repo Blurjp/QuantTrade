@@ -49,7 +49,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [-170.0, -5.0, -120.0, 5.0],
                 "ocean": "Pacific",
                 "type": "enso_indicator",
-                "instruments": ["CORN", "SOYB", "WEAT", "CANE", "JO"],
+                "instruments": ["CORN", "SOYB", "WEAT"],
                 "description": "Primary ENSO monitoring region",
                 "baseline_sst": 27.5,  # °C
                 "enso_threshold": 0.5,
@@ -84,7 +84,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [-98.0, 18.0, -80.0, 30.0],
                 "ocean": "Atlantic",
                 "type": "agricultural_impact",
-                "instruments": ["CORN", "SOYB", "COTTON", "NG"],
+                "instruments": ["CORN", "SOYB", "UNG"],
                 "description": "US Gulf moisture source",
                 "baseline_sst": 27.0,
                 "impact": "US Midwest rainfall"
@@ -94,7 +94,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [-80.0, 10.0, -20.0, 30.0],
                 "ocean": "Atlantic",
                 "type": "hurricane_zone",
-                "instruments": ["NG", "OIL", "XLE", "UNG"],
+                "instruments": ["UNG", "USO", "XLE"],
                 "description": "Hurricane formation zone",
                 "baseline_sst": 26.5,
                 "hurricane_threshold": 26.0,
@@ -107,7 +107,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [50.0, -10.0, 100.0, 20.0],
                 "ocean": "Indian",
                 "type": "monsoon_region",
-                "instruments": ["COTTON", "SUGAR", "TEA", "RICE"],
+                "instruments": ["SOYB", "CORN"],
                 "description": "Indian monsoon driver",
                 "baseline_sst": 28.0,
                 "impact": "Indian agriculture"
@@ -117,7 +117,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [120.0, -10.0, 170.0, 10.0],
                 "ocean": "Pacific",
                 "type": "monsoon_region",
-                "instruments": ["RICE", "PALM", "SUGAR"],
+                "instruments": ["CORN", "SOYB"],
                 "description": "Southeast Asian monsoon driver",
                 "baseline_sst": 29.5,
                 "impact": "SE Asia agriculture"
@@ -129,7 +129,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [-85.0, -20.0, -70.0, -5.0],
                 "ocean": "Pacific",
                 "type": "fishing_grounds",
-                "instruments": ["FISH", "FMC", "SEA"],
+                "instruments": ["SOYB", "FMC"],
                 "description": "Major anchovy fishery",
                 "baseline_sst": 18.0,
                 "impact": "Fish meal production"
@@ -139,7 +139,7 @@ class SeaSurfaceTemperatureMonitor:
                 "bbox": [10.0, -35.0, 20.0, -20.0],
                 "ocean": "Atlantic",
                 "type": "fishing_grounds",
-                "instruments": ["FISH", "SEA"],
+                "instruments": ["SOYB"],
                 "description": "South African fishery",
                 "baseline_sst": 15.0,
                 "impact": "African fisheries"

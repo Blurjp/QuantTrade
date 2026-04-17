@@ -451,6 +451,12 @@ def run_daily_pipeline(
     total_value = portfolio.get_total_value(prices)
 
     record_daily_assets(total_value, target_date, output_base=output_base)
+
+    try:
+        from pipeline.wiki_ingest import ingest_daily_summary
+        ingest_daily_summary(target_date, summary, output_base=output_base)
+    except Exception as e:
+        print(f"  Warning: wiki ingest failed: {e}")
     
     return summary
 

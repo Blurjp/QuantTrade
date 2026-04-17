@@ -48,6 +48,7 @@ def build_system_prompt(
     persistence_state: Optional[Dict] = None,
     daily_brief: str = "",
     selected_day: str = "",
+    wiki_query: str = "",
 ) -> str:
     """
     Assemble a system prompt that gives the LLM all the page context it needs
@@ -106,6 +107,16 @@ def build_system_prompt(
         lines.append(f"\n--- Daily Chinese Brief ---\n{trimmed}")
 
     lines.append("\n== CONTEXT END ==")
+
+    if wiki_query:
+        try:
+            from pipeline.wiki_ingest import build_wiki_context
+            wiki_context = build_wiki_context(wiki_query)
+            if wiki_context:
+                lines.append(f"\n{wiki_context}")
+        except Exception:
+            pass
+
     lines.append(
         "\nIf the user asks about how to trade on Fidelity, explain which ticker to search "
         "and whether to click Buy or use an inverse ETF for short signals. "

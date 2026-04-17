@@ -1289,6 +1289,7 @@ def _render_sidebar_chat(
         persistence_state=persistence_state,
         daily_brief=daily_brief,
         selected_day=selected_day,
+        wiki_query=selected_day or "",
     )
     if new_prompt != st.session_state.chat_system_prompt:
         st.session_state.chat_system_prompt = new_prompt

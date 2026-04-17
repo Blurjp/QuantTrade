@@ -66,21 +66,17 @@ def fetch_price_yahoo(ticker: str) -> Optional[float]:
     """
     Fetch price from Yahoo Finance (free, may have rate limits).
     
-    Uses yfinance library.
+    Uses yfinance library. Uses the ticker as-is for Yahoo lookup.
     """
     try:
         import yfinance as yf
-        normalized = _normalize_ticker(ticker)
         
-        # Map tickers to Yahoo format
+        # Map specific names to Yahoo futures tickers
         yahoo_ticker = {
-            "WTI": "CL=F",  # WTI Crude Futures
-            "Brent": "BZ=F",  # Brent Crude Futures
+            "WTI": "CL=F",
+            "Brent": "BZ=F",
             "Natural Gas": "NG=F",
-            "Corn": "ZC=F",
-            "Soybeans": "ZS=F",
-            "Wheat": "ZW=F",
-        }.get(normalized, normalized)
+        }.get(ticker, ticker)  # Use original ticker, not normalized
         
         stock = yf.Ticker(yahoo_ticker)
         hist = stock.history(period="1d")

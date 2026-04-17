@@ -121,7 +121,8 @@ class MultiAssetPortfolio:
             
             # Load positions
             for ticker, pos_data in state.get("positions", {}).items():
-                self.positions[ticker] = Position(**pos_data)
+                pos_copy = {k: v for k, v in pos_data.items() if k != 'current_price'}
+                self.positions[ticker] = Position(**pos_copy)
             
             # Load trades
             self.trades = [Trade(**t) for t in state.get("trades", [])]

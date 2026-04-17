@@ -475,6 +475,16 @@ def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
     except Exception as e:
         logger.warning(f"Precipitation failed: {e}")
 
+    # Cattle Feedlot
+    try:
+        from pipeline.cattle_feedlot import CattleFeedlotMonitor
+        cattle_monitor = CattleFeedlotMonitor(output_base=output_base)
+        cattle_signals = cattle_monitor.generate_signal()
+        all_signals.extend(cattle_signals)
+        logger.info(f"Cattle feedlot: {len(cattle_signals)} signals")
+    except Exception as e:
+        logger.warning(f"Cattle feedlot failed: {e}")
+
     # Count actionable
     actionable = sum(1 for s in all_signals if s.get("direction") != "neutral")
     logger.info(f"Satellite monitors total: {len(all_signals)} signals, {actionable} actionable")

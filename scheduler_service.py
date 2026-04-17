@@ -699,6 +699,12 @@ def run_daily_pipeline():
         # Sort signals by confidence (highest first)
         sorted_signals = sorted(best_signals.items(), key=lambda x: -x[1].get("confidence", 0))
 
+        logger.info(f"Auto-trade: {len(sorted_signals)} candidates, {len(prices)} prices, cash=${portfolio.cash:.0f}")
+        for key, sig in sorted_signals[:5]:
+            insts = sig.get('instruments', [])
+            price_check = {i: prices.get(i) for i in insts if isinstance(i, str)}
+            logger.info(f"  Top signal: {key} dir={sig.get('direction')} conf={sig.get('confidence')} inst_prices={price_check}")
+
         for key, sig in sorted_signals:
             if trades_made >= 3:
                 break  # Max 3 new positions per run

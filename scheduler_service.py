@@ -122,8 +122,8 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                                 "signal_type": sig.get("signal_type", module_dir.name),
                             }
                             all_signals[region_id] = mapped
-                    except:
-                        pass
+                    except Exception:
+                        logger.warning("Failed to load signals from %s", module_dir.name)
             self._send_json({"date": "latest", "signals": all_signals})
 
         elif self.path == "/api/signals":
@@ -181,8 +181,12 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             # Serve any file from outputs/ directory
             from urllib.parse import unquote
             rel_path = unquote(self.path[len("/api/outputs/"):])
-            file_path = Path(OUTPUT_BASE) / rel_path
-            if file_path.exists() and file_path.is_file():
+            # Prevent path traversal: resolve and verify it's within OUTPUT_BASE
+            base_path = Path(OUTPUT_BASE).resolve()
+            file_path = (base_path / rel_path).resolve()
+            if not str(file_path).startswith(str(base_path)):
+                self._send_json({"error": "Access denied"}, 403)
+            elif file_path.exists() and file_path.is_file():
                 try:
                     content = file_path.read_text()
                     import json as _json

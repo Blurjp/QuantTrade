@@ -590,7 +590,8 @@ class NASAGESDISCFetcher:
                 return False
                 
             return True
-        except:
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid date format %s: %s", date, e)
             return False
 
     def _build_imerg_url(self, date: str) -> str:
@@ -706,8 +707,8 @@ class NASAGESDISCFetcher:
                 finally:
                     try:
                         Path(local_path).unlink(missing_ok=True)
-                    except:
-                        pass
+                    except OSError as e:
+                        logger.warning("Failed to delete temp file %s: %s", local_path, e)
 
             if not precip_values:
                 return None

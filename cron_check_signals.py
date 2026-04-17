@@ -42,8 +42,8 @@ def is_monitoring_hours() -> bool:
         et = pytz.timezone('America/New_York')
         now_et = datetime.now(et)
         hour = now_et.hour
-    except:
-        # Fallback to system time
+    except (pytz.exceptions.UnknownTimeZoneError, Exception) as e:
+        logger.warning("Failed to get ET timezone: %s, using system time", e)
         hour = datetime.now().hour
     
     start_hour = int(os.getenv("MONITORING_START_HOUR", "7"))

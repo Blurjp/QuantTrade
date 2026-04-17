@@ -5,11 +5,14 @@ Processes all active regions and generates signals for the multi-asset portfolio
 """
 
 import argparse
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import json
 from typing import Dict, List, Optional
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from pipeline.regions import get_active_regions, load_registry
 from pipeline.detection_dispatcher import run_detection
@@ -355,12 +358,16 @@ def run_daily_pipeline(
     for region_id, region_config in active_regions.items():
         print(f"\n[{region_config.get('name', region_id)}]")
         
-        result = process_region(
-            region_id=region_id,
-            region_config=region_config,
-            target_date=target_date,
-            output_base=output_base,
-        )
+        try:
+            result = process_region(
+                region_id=region_id,
+                region_config=region_config,
+                target_date=target_date,
+                output_base=output_base,
+            )
+        except Exception as e:
+            logger.error("Failed to process region %s: %s", region_id, e)
+            result = {"status": "error", "message": str(e), "detection": {}}
         
         results.append(result)
         
@@ -373,16 +380,19 @@ def run_daily_pipeline(
             "instruments": region_config.get("instruments", []),
         }
 
-        if result["status"] == "success":
-            frame = _extract_signal_frame(
-                region_config.get("type"),
-                result.get("detection", {}),
-                region_id,
-                output_base,
-            )
-            if not frame.empty:
-                generated_signal = generate_signal(region_config.get("type"), frame)
-                signal_payload.update(generated_signal)
+        try:
+            if result["status"] == "success":
+                frame = _extract_signal_frame(
+                    region_config.get("type"),
+                    result.get("detection", {}),
+                    region_id,
+                    output_base,
+                )
+                if not frame.empty:
+                    generated_signal = generate_signal(region_config.get("type"), frame)
+                    signal_payload.update(generated_signal)
+        except Exception as e:
+            logger.warning("Failed to generate signal for %s: %s", region_id, e)
 
         persisted_signal, persisted_state = apply_signal_persistence(
             signal_payload,

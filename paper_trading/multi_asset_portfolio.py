@@ -5,11 +5,15 @@ Supports trading across multiple asset classes based on satellite signals.
 """
 
 import json
+import logging
+import threading
 from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -66,6 +70,9 @@ class MultiAssetPortfolio:
         self.positions: Dict[str, Position] = {}  # ticker -> Position
         self.trades: List[Trade] = []
         self.daily_snapshots: List[dict] = []
+        
+        # Thread lock for concurrent access (reentrant to allow nested calls)
+        self._lock = threading.RLock()
         
         # Asset class definitions
         self.asset_classes = {
@@ -213,187 +220,192 @@ class MultiAssetPortfolio:
         take_profit_pct: float = None,
     ) -> Optional[Trade]:
         """Open a new position."""
-        can_open, reason = self.can_open_position(ticker, value, direction)
-        if not can_open:
-            print(f"Cannot open position: {reason}")
-            return None
-        
-        # Get default risk parameters
-        asset_config = self.asset_classes.get(asset_class, {})
-        if stop_loss_pct is None:
-            stop_loss_pct = asset_config.get("default_stop_loss", 0.05)
-        if take_profit_pct is None:
-            take_profit_pct = asset_config.get("default_take_profit", 0.15)
-        
-        # Calculate quantity
-        quantity = value / price
-        
-        # Set stop loss and take profit
-        if direction == "long":
-            stop_loss = price * (1 - stop_loss_pct)
-            take_profit = price * (1 + take_profit_pct)
-        else:  # short
-            stop_loss = price * (1 + stop_loss_pct)
-            take_profit = price * (1 - take_profit_pct)
-        
-        # Create position
-        position = Position(
-            ticker=ticker,
-            asset_class=asset_class,
-            direction=direction,
-            quantity=quantity,
-            entry_price=price,
-            entry_date=date.today().isoformat(),
-            position_value=value,
-            rationale=rationale,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-        )
-        
-        self.positions[ticker] = position
-        if direction == "short":
-            # Short: receive cash from selling borrowed shares
-            self.cash += value
-        else:
-            # Long: pay cash to buy
-            self.cash -= value
-        
-        # Record trade
-        trade = Trade(
-            date=date.today().isoformat(),
-            ticker=ticker,
-            action=f"OPEN_{direction.upper()}",
-            price=price,
-            quantity=quantity,
-            value=value,
-            rationale=rationale,
-        )
-        self.trades.append(trade)
-        
-        self._save_state()
-        return trade
+        with self._lock:
+            can_open, reason = self.can_open_position(ticker, value, direction)
+            if not can_open:
+                logger.warning("Cannot open position: %s", reason)
+                return None
+            
+            # Get default risk parameters
+            asset_config = self.asset_classes.get(asset_class, {})
+            if stop_loss_pct is None:
+                stop_loss_pct = asset_config.get("default_stop_loss", 0.05)
+            if take_profit_pct is None:
+                take_profit_pct = asset_config.get("default_take_profit", 0.15)
+            
+            # Calculate quantity
+            quantity = value / price
+            
+            # Set stop loss and take profit
+            if direction == "long":
+                stop_loss = price * (1 - stop_loss_pct)
+                take_profit = price * (1 + take_profit_pct)
+            else:  # short
+                stop_loss = price * (1 + stop_loss_pct)
+                take_profit = price * (1 - take_profit_pct)
+            
+            # Create position
+            position = Position(
+                ticker=ticker,
+                asset_class=asset_class,
+                direction=direction,
+                quantity=quantity,
+                entry_price=price,
+                entry_date=date.today().isoformat(),
+                position_value=value,
+                rationale=rationale,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+            
+            self.positions[ticker] = position
+            if direction == "short":
+                # Short: receive cash from selling borrowed shares
+                self.cash += value
+            else:
+                # Long: pay cash to buy
+                self.cash -= value
+            
+            # Record trade
+            trade = Trade(
+                date=date.today().isoformat(),
+                ticker=ticker,
+                action=f"OPEN_{direction.upper()}",
+                price=price,
+                quantity=quantity,
+                value=value,
+                rationale=rationale,
+            )
+            self.trades.append(trade)
+            
+            self._save_state()
+            return trade
     
     def close_position(self, ticker: str, price: float, rationale: str = "") -> Optional[Trade]:
         """Close a position."""
-        if ticker not in self.positions:
-            return None
-        
-        pos = self.positions[ticker]
-        
-        # Calculate P&L
-        if pos.direction == "long":
-            pnl = pos.quantity * (price - pos.entry_price)
-        else:  # short
-            pnl = pos.quantity * (pos.entry_price - price)
-        
-        # Return/release cash based on direction
-        if pos.direction == "short":
-            # Short close: buy back shares (cash out = original proceeds - cost to buy back)
-            # We already received cash when opening, now pay to buy back
-            self.cash += pnl  # pnl already accounts for entry vs exit price
-        else:
-            # Long close: receive back principal + profit
-            self.cash += pos.position_value + pnl
-        
-        # Record trade
-        trade = Trade(
-            date=date.today().isoformat(),
-            ticker=ticker,
-            action="CLOSE",
-            price=price,
-            quantity=pos.quantity,
-            value=pos.position_value,
-            pnl=pnl,
-            rationale=rationale,
-        )
-        self.trades.append(trade)
-        
-        # Remove position
-        del self.positions[ticker]
-        
-        self._save_state()
-        return trade
+        with self._lock:
+            if ticker not in self.positions:
+                return None
+            
+            pos = self.positions[ticker]
+            
+            # Calculate P&L
+            if pos.direction == "long":
+                pnl = pos.quantity * (price - pos.entry_price)
+            else:  # short
+                pnl = pos.quantity * (pos.entry_price - price)
+            
+            # Return/release cash based on direction
+            if pos.direction == "short":
+                # Short close: buy back shares (cash out = original proceeds - cost to buy back)
+                # We already received cash when opening, now pay to buy back
+                self.cash += pnl  # pnl already accounts for entry vs exit price
+            else:
+                # Long close: receive back principal + profit
+                self.cash += pos.position_value + pnl
+            
+            # Record trade
+            trade = Trade(
+                date=date.today().isoformat(),
+                ticker=ticker,
+                action="CLOSE",
+                price=price,
+                quantity=pos.quantity,
+                value=pos.position_value,
+                pnl=pnl,
+                rationale=rationale,
+            )
+            self.trades.append(trade)
+            
+            # Remove position
+            del self.positions[ticker]
+            
+            self._save_state()
+            return trade
     
     def update_position_prices(self, prices: Dict[str, float]):
         """Update all position prices and check risk management."""
-        closed_trades = []
-        
-        for ticker, pos in list(self.positions.items()):
-            if ticker not in prices:
-                continue
+        with self._lock:
+            closed_trades = []
             
-            current_price = prices[ticker]
-            
-            # Calculate unrealized P&L
-            if pos.direction == "long":
-                pos.unrealized_pnl = pos.quantity * (current_price - pos.entry_price)
+            for ticker, pos in list(self.positions.items()):
+                if ticker not in prices:
+                    continue
                 
-                # Check stop loss
-                if current_price <= pos.stop_loss:
-                    trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
-                    if trade:
-                        closed_trades.append(trade)
-                # Check take profit
-                elif current_price >= pos.take_profit:
-                    trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
-                    if trade:
-                        closed_trades.append(trade)
-            
-            else:  # short
-                pos.unrealized_pnl = pos.quantity * (pos.entry_price - current_price)
+                current_price = prices[ticker]
                 
-                # Check stop loss
-                if current_price >= pos.stop_loss:
-                    trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
-                    if trade:
-                        closed_trades.append(trade)
-                # Check take profit
-                elif current_price <= pos.take_profit:
-                    trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
-                    if trade:
-                        closed_trades.append(trade)
-        
-        return closed_trades
+                # Calculate unrealized P&L
+                if pos.direction == "long":
+                    pos.unrealized_pnl = pos.quantity * (current_price - pos.entry_price)
+                    
+                    # Check stop loss
+                    if current_price <= pos.stop_loss:
+                        trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
+                        if trade:
+                            closed_trades.append(trade)
+                    # Check take profit
+                    elif current_price >= pos.take_profit:
+                        trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
+                        if trade:
+                            closed_trades.append(trade)
+                
+                else:  # short
+                    pos.unrealized_pnl = pos.quantity * (pos.entry_price - current_price)
+                    
+                    # Check stop loss
+                    if current_price >= pos.stop_loss:
+                        trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
+                        if trade:
+                            closed_trades.append(trade)
+                    # Check take profit
+                    elif current_price <= pos.take_profit:
+                        trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
+                        if trade:
+                            closed_trades.append(trade)
+            
+            return closed_trades
     
     def get_total_value(self, prices: Dict[str, float]) -> float:
         """Calculate total portfolio value."""
-        total = self.cash
+        with self._lock:
+            total = self.cash
 
-        for ticker, pos in self.positions.items():
-            price = prices.get(ticker)
-            if price is not None and price > 0:
-                if pos.direction == "long":
-                    total += pos.quantity * price
-                else:  # short
-                    total += pos.position_value + pos.quantity * (pos.entry_price - price)
-            else:
-                # Fallback to position value if price unavailable
-                total += pos.position_value + (pos.unrealized_pnl or 0)
+            for ticker, pos in self.positions.items():
+                price = prices.get(ticker)
+                if price is not None and price > 0:
+                    if pos.direction == "long":
+                        total += pos.quantity * price
+                    else:  # short
+                        total += pos.position_value + pos.quantity * (pos.entry_price - price)
+                else:
+                    # Fallback to position value if price unavailable
+                    total += pos.position_value + (pos.unrealized_pnl or 0)
 
-        return total
+            return total
     
     def get_summary(self, prices: Dict[str, float]) -> dict:
         """Get portfolio summary."""
-        total_value = self.get_total_value(prices)
-        total_return = (total_value - self.initial_capital) / self.initial_capital
-        
-        unrealized_pnl = sum(pos.unrealized_pnl for pos in self.positions.values())
-        
-        # Sector breakdown
-        sector_breakdown = {}
-        for ticker, pos in self.positions.items():
-            sector = self.sector_map.get(ticker, "other")
-            if sector not in sector_breakdown:
-                sector_breakdown[sector] = {"value": 0, "pnl": 0}
-            sector_breakdown[sector]["value"] += pos.position_value
-            sector_breakdown[sector]["pnl"] += pos.unrealized_pnl
-        
-        return {
-            "initial_capital": self.initial_capital,
-            "cash": self.cash,
-            "num_positions": len(self.positions),
-            "total_value": total_value,
-            "total_return_pct": total_return * 100,
+        with self._lock:
+            total_value = self.get_total_value(prices)
+            total_return = (total_value - self.initial_capital) / self.initial_capital
+            
+            unrealized_pnl = sum(pos.unrealized_pnl for pos in self.positions.values())
+            
+            # Sector breakdown
+            sector_breakdown = {}
+            for ticker, pos in self.positions.items():
+                sector = self.sector_map.get(ticker, "other")
+                if sector not in sector_breakdown:
+                    sector_breakdown[sector] = {"value": 0, "pnl": 0}
+                sector_breakdown[sector]["value"] += pos.position_value
+                sector_breakdown[sector]["pnl"] += pos.unrealized_pnl
+            
+            return {
+                "initial_capital": self.initial_capital,
+                "cash": self.cash,
+                "num_positions": len(self.positions),
+                "total_value": total_value,
+                "total_return_pct": total_return * 100,
             "unrealized_pnl": unrealized_pnl,
             "sector_breakdown": sector_breakdown,
             "num_trades": len([t for t in self.trades if t.action == "CLOSE"]),

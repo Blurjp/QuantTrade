@@ -1143,7 +1143,12 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
     for region_id, signal in ranked:
         score = signal.get("vote_score")
         if score is None:
-            score = signal.get("ndvi_change", "")
+            score = signal.get("ndvi_change")
+        # Ensure score is always float for Arrow compatibility
+        if isinstance(score, (int, float)):
+            score = float(score)
+        else:
+            score = 0.0
         display_rows.append(
             {
                 "rank_region": region_id,

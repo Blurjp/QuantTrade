@@ -507,6 +507,9 @@ def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
         if not current_price or current_price <= 0:
             continue
 
+        # Update current price on position for dashboard display
+        pos.current_price = current_price
+
         # Calculate P&L percentage
         if pos.direction == "long":
             pnl_pct = (current_price - pos.entry_price) / pos.entry_price
@@ -571,8 +574,10 @@ def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
             logger.error(f"Close notification failed: {e}")
 
         logger.info(f"Stop-loss/take-profit: {len(closed_positions)} positions auto-closed")
+        portfolio._save_state()
     else:
         logger.info("Stop-loss/take-profit: all positions within limits")
+        portfolio._save_state()
 
 
 def run_daily_pipeline():
@@ -714,18 +719,15 @@ def run_daily_pipeline():
             if not instruments:
                 continue
 
-            # Pick first available instrument with price
+            # Pick first available instrument with price AND not already held
             ticker = None
             for inst in instruments:
-                if isinstance(inst, str) and inst in prices and prices[inst]:
+                if isinstance(inst, str) and inst in prices and prices[inst] and inst not in portfolio.positions:
                     ticker = inst
                     break
 
             if not ticker:
-                continue
-
-            # Skip if already have a position in this ticker
-            if ticker in portfolio.positions:
+                logger.info(f"  Skip {key}: no available instrument (held={set(instruments) & set(portfolio.positions.keys()) or 'none'}, no_price={[i for i in instruments if i not in prices or not prices[i]]})")
                 continue
 
             price = float(prices[ticker])

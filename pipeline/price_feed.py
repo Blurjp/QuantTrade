@@ -180,11 +180,12 @@ def fetch_all_prices(
         # Rate limiting
         time.sleep(0.1)
     
-    # Save cache
+    # Save cache (only non-zero, non-None values)
     cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cached_prices = {k: v for k, v in prices.items() if v and v > 0}
     cache_file.write_text(json.dumps({
         "timestamp": datetime.now().isoformat(),
-        "prices": prices,
+        "prices": cached_prices,
     }, indent=2))
     
     return prices

@@ -163,39 +163,27 @@ class CattleFeedlotMonitor:
         if not region:
             return {}
 
-        # Try to load thermal data from pipeline outputs
-        thermal_file = self.output_base / "thermal" / f"{region_id}_thermal.json"
-        if thermal_file.exists():
-            with open(thermal_file) as f:
-                return json.load(f)
+        # Map cattle region_id to thermal facility IDs
+        thermal_map = {
+            "texas_panhandle": "feedlot_texas_panhandle",
+            "sw_kansas": "feedlot_sw_kansas",
+            "central_nebraska": "feedlot_central_nebraska",
+        }
 
-        # Fallback: use atmospheric module data if available
-        atm_file = self.output_base / "atmospheric" / f"{region_id}_atmospheric.json"
-        if atm_file.exists():
-            with open(atm_file) as f:
-                atm_data = json.load(f)
-                # Extract thermal-relevant fields
-                return {
-                    "region_id": region_id,
-                    "thermal_anomaly": atm_data.get("emission_anomaly_pct", 0),
-                    "date": atm_data.get("date", datetime.now().isoformat()),
-                    "source": "atmospheric_fallback",
-                }
-
-        # Generate estimate from vegetation data (inverse correlation)
-        veg_file = self.output_base / "vegetation" / f"{region_id}_vegetation.json"
-        if veg_file.exists():
-            with open(veg_file) as f:
-                veg_data = json.load(f)
-                ndvi = veg_data.get("current_ndvi", 0.5)
-                # Low NDVI = less pasture = more cattle in feedlots
-                feedlot_pressure = max(0, (0.65 - ndvi) / 0.65) * 100
-                return {
-                    "region_id": region_id,
-                    "thermal_anomaly": round(feedlot_pressure, 1),
-                    "date": veg_data.get("date", datetime.now().isoformat()),
-                    "source": "vegetation_proxy",
-                }
+        thermal_id = thermal_map.get(region_id)
+        if thermal_id:
+            thermal_file = self.output_base / "thermal_infrared" / f"signal_{thermal_id}_*.json"
+            import glob
+            files = sorted(glob.glob(str(thermal_file)))
+            if files:
+                with open(files[-1]) as f:
+                    data = json.load(f)
+                    return {
+                        "region_id": region_id,
+                        "thermal_anomaly": data.get("anomaly_pct", data.get("temperature_anomaly", 0)),
+                        "date": data.get("date", datetime.now().isoformat()),
+                        "source": "thermal_infrared",
+                    }
 
         return {
             "region_id": region_id,
@@ -206,23 +194,33 @@ class CattleFeedlotMonitor:
 
     def analyze_pasture_health(self) -> Dict:
         """
-        Analyze pasture/grazing land health via NDVI.
-        Healthy pasture = lower feed costs = more grazing = less feedlot pressure.
-        Poor pasture = more cattle moved to feedlots = higher feed costs.
+        Analyze pasture/grazing land health via NDVI from vegetation pipeline.
         """
+        # Map pasture region IDs to vegetation pipeline region IDs
+        pasture_to_veg = {
+            "flint_hills": "usa_flint_hills_pasture",
+            "sandhills_ne": "usa_sandhills_pasture",
+            "tx_hill_country": "usa_texas_panhandle_feedlot",
+        }
+
         results = {}
         for region_id, region in self.pasture_regions.items():
-            veg_file = self.output_base / "vegetation" / f"{region_id}_vegetation.json"
-            if veg_file.exists():
-                with open(veg_file) as f:
-                    data = json.load(f)
-                    results[region_id] = {
-                        "ndvi": data.get("current_ndvi", 0),
-                        "anomaly_pct": data.get("ndvi_anomaly_pct", 0),
-                        "status": data.get("status", "unknown"),
-                    }
-            else:
-                results[region_id] = {"ndvi": 0, "anomaly_pct": 0, "status": "no_data"}
+            veg_id = pasture_to_veg.get(region_id)
+            if veg_id:
+                # Try loading latest vegetation signal
+                import glob
+                veg_files = sorted(glob.glob(str(self.output_base / "vegetation" / f"*{veg_id}*")))
+                if veg_files:
+                    with open(veg_files[-1]) as f:
+                        data = json.load(f)
+                        results[region_id] = {
+                            "ndvi": data.get("current_ndvi", 0),
+                            "anomaly_pct": data.get("ndvi_anomaly_pct", 0),
+                            "status": data.get("status", "unknown"),
+                        }
+                        continue
+
+            results[region_id] = {"ndvi": 0, "anomaly_pct": 0, "status": "no_data"}
 
         return results
 

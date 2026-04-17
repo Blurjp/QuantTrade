@@ -88,6 +88,72 @@ class VegetationHealthMonitor:
                 "critical_months": [4, 5, 6, 7],
                 "crops": ["winter_wheat", "spring_wheat"]
             },
+            "usa_texas_panhandle_feedlot": {
+                "name": "Texas Panhandle Feedlot & Grazing",
+                "bbox": [-102.8, 35.1, -101.1, 36.6],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Largest US feedlot concentration, pasture & feed monitoring",
+                "baseline_ndvi": 0.4,
+                "critical_months": [3, 4, 5, 6, 7, 8, 9, 10],
+                "crops": ['pasture', 'sorghum']
+            },
+            "usa_sw_kansas_feedlot": {
+                "name": "SW Kansas Feedlot & Grazing",
+                "bbox": [-101.1, 37.1, -99.8, 38.4],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Dodge City, Garden City feedlot region",
+                "baseline_ndvi": 0.42,
+                "critical_months": [4, 5, 6, 7, 8, 9],
+                "crops": ['pasture', 'wheat']
+            },
+            "usa_central_nebraska_feedlot": {
+                "name": "Central Nebraska Feedlot & Grazing",
+                "bbox": [-100.2, 40.3, -98.3, 41.3],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Nebraska Sandhills feedlot corridor",
+                "baseline_ndvi": 0.45,
+                "critical_months": [5, 6, 7, 8, 9],
+                "crops": ['pasture', 'corn']
+            },
+            "usa_ne_colorado_feedlot": {
+                "name": "NE Colorado Feedlot & Grazing",
+                "bbox": [-105.0, 40.0, -103.6, 40.9],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Greeley-Sterling feedlot corridor",
+                "baseline_ndvi": 0.38,
+                "critical_months": [4, 5, 6, 7, 8, 9],
+                "crops": ['pasture', 'corn']
+            },
+            "usa_flint_hills_pasture": {
+                "name": "Flint Hills Kansas Grazing",
+                "bbox": [-97.5, 37.6, -95.8, 39.1],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Major Kansas grazing land, leading cattle pasture indicator",
+                "baseline_ndvi": 0.5,
+                "critical_months": [4, 5, 6, 7, 8, 9, 10],
+                "crops": ['pasture', 'tallgrass']
+            },
+            "usa_sandhills_pasture": {
+                "name": "Nebraska Sandhills Grazing",
+                "bbox": [-103.5, 41.2, -100.0, 42.9],
+                "country": "USA",
+                "type": "pasture",
+                "instruments": ['COW', 'CORN'],
+                "description": "Largest sand dune grassland in Western Hemisphere, key cattle grazing",
+                "baseline_ndvi": 0.43,
+                "critical_months": [5, 6, 7, 8, 9],
+                "crops": ['pasture', 'mixed_grass']
+            },
             
             # South America
             "brazil_cerrado": {

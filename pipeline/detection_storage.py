@@ -389,13 +389,28 @@ def get_eia_storage_data(api_key: str = None) -> Dict:
     
     EIA API: https://api.eia.gov/v2/petroleum/stor/wpy/
     """
-    # TODO: Implement EIA API integration
-    # Free API key available from eia.gov
+    import os
+    from pipeline.eia_data import fetch_eia_cushing_report
+    
+    if api_key is None:
+        api_key = os.environ.get("EIA_API_KEY")
+    
+    report = fetch_eia_cushing_report(api_key)
+    
+    if report.get("status") == "success":
+        return {
+            "source": report["data_source"],
+            "date": report["date"],
+            "inventory_mb": report["inventory_mb"],
+            "change_mb": report["change_mb"],
+            "change_pct": report["change_pct"],
+            "trend": report["trend"],
+        }
     
     return {
         "source": "EIA",
-        "status": "not_implemented",
-        "note": "Requires EIA API key",
+        "status": report.get("status", "error"),
+        "note": report.get("message", "Failed to fetch EIA data"),
     }
 
 

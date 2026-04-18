@@ -251,9 +251,12 @@ def get_current_oil_price() -> float:
     In production, this would fetch from an API.
     For simulation, use a default or cached value.
     """
-    # TODO: Integrate with real price feed
-    # For now, return a simulated price based on signal
-    return 120.0  # Default conflict-elevated price
+    from pipeline.price_feed import get_price
+    try:
+        price = get_price("WTI")
+        return price if price > 0 else 86.0
+    except Exception:
+        return 86.0
 
 
 if __name__ == "__main__":

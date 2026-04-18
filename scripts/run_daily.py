@@ -14,7 +14,6 @@ import json
 from typing import Dict, List, Optional
 import pandas as pd
 
-# TODO: P0.3 - Update imports when pipeline modules are moved to data/
 from pipeline.regions import get_active_regions, load_registry
 from pipeline.detection_dispatcher import run_detection
 from pipeline.signals import generate_signal

@@ -159,15 +159,75 @@ def count_vehicles_in_parking_lots(
         lot_name = lot.get("name", f"lot_{idx}")
         lot_geom = lot.geometry
         
-        # TODO: Load Sentinel-2 scene and crop to lot
-        # For now, return placeholder
         lot_result = {
             "name": lot_name,
             "polygon": lot_geom.bounds,
             "vehicle_count": 0,
             "confidence": "low",
-            "note": "Pending Sentinel-2 data integration",
+            "note": "Sentinel-2 fetch failed",
         }
+        
+        try:
+            from data.loaders.manifest import load_stac_items
+            import planetary_computer
+            import rasterio
+            from rasterio.mask import mask as rasterio_mask
+            from shapely.geometry import mapping
+            
+            items = load_stac_items(
+                lot_geom,
+                image_date,
+                collection="sentinel-2-l2a",
+                max_cloud_cover=30,
+            )
+            
+            if not items:
+                lot_result["note"] = "No Sentinel-2 scenes available"
+                results["lots"].append(lot_result)
+                results["total_vehicles"] += lot_result["vehicle_count"]
+                continue
+            
+            signed_item = planetary_computer.sign(items[0])
+            asset = signed_item.assets.get("visual") or signed_item.assets.get("B04")
+            
+            if not asset:
+                lot_result["note"] = "No visual/B04 asset in scene"
+                results["lots"].append(lot_result)
+                results["total_vehicles"] += lot_result["vehicle_count"]
+                continue
+            
+            with rasterio.open(asset.href) as src:
+                out_image, out_transform = rasterio_mask(
+                    src, [mapping(lot_geom)], crop=True
+                )
+            
+            import numpy as np
+            image = np.transpose(out_image, (1, 2, 0))
+            
+            if image.shape[0] < 10 or image.shape[1] < 10:
+                lot_result["note"] = "Cropped image too small"
+                results["lots"].append(lot_result)
+                results["total_vehicles"] += lot_result["vehicle_count"]
+                continue
+            
+            detections = detector.detect(image)
+            
+            lot_result = {
+                "name": lot_name,
+                "polygon": lot_geom.bounds,
+                "vehicle_count": len(detections),
+                "confidence": "high" if detector.use_yolo else "medium",
+                "detections": detections,
+                "note": "success",
+            }
+        except ImportError as e:
+            lot_result["note"] = f"Missing dependency: {e}"
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Vehicle detection failed for lot %s: %s", lot_name, e
+            )
+            lot_result["note"] = str(e)
         
         results["lots"].append(lot_result)
         results["total_vehicles"] += lot_result["vehicle_count"]
@@ -188,34 +248,51 @@ def get_retail_baseline(ticker: str, lookback_weeks: int = 52) -> Dict:
     
     Uses historical satellite data or alternative data sources.
     """
-    # TODO: Implement baseline calculation
-    # Could use:
-    # 1. Historical Sentinel-2 data (free)
-    # 2. Google Popular Times (scraped)
-    # 3. Foot traffic data (paid: SafeGraph, Placer.ai)
+    import numpy as np
+    from pathlib import Path
+    import logging
     
-    baselines = {
-        "WMT": {
-            "weekly_avg_visits": 5000,
-            "peak_day": "Saturday",
-            "peak_hour": 14,
-            "source": "placeholder",
-        },
-        "COST": {
-            "weekly_avg_visits": 3000,
-            "peak_day": "Saturday",
-            "peak_hour": 12,
-            "source": "placeholder",
-        },
-        "TGT": {
-            "weekly_avg_visits": 4000,
-            "peak_day": "Saturday",
-            "peak_hour": 14,
-            "source": "placeholder",
-        },
+    logger = logging.getLogger(__name__)
+    
+    TICKER_REGION_MAP = {"WMT": "walmart_hq", "COST": "costco_hq", "TGT": "target_hq"}
+    region_id = TICKER_REGION_MAP.get(ticker.upper())
+    
+    if not region_id:
+        return {"weekly_avg_visits": 0, "source": "unknown_ticker"}
+    
+    vehicle_counts = []
+    output_base = Path("outputs")
+    
+    for date_dir in sorted(output_base.iterdir(), reverse=True):
+        if not date_dir.is_dir() or not date_dir.name[0:4].isdigit():
+            continue
+        
+        region_dir = date_dir / "parking" / region_id
+        if not region_dir.exists():
+            continue
+            
+        for count_file in region_dir.glob("vehicle_count.json"):
+            try:
+                import json
+                data = json.loads(count_file.read_text())
+                vehicle_counts.append(data.get("total_vehicles", 0))
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        if len(vehicle_counts) >= lookback_weeks * 7:
+            break
+    
+    if not vehicle_counts:
+        return {"weekly_avg_visits": 0, "source": "no_historical_data"}
+    
+    return {
+        "weekly_avg_visits": float(np.mean(vehicle_counts)),
+        "std_visits": float(np.std(vehicle_counts)) if len(vehicle_counts) > 1 else 0,
+        "sample_count": len(vehicle_counts),
+        "min": min(vehicle_counts),
+        "max": max(vehicle_counts),
+        "source": "satellite_historical",
     }
-    
-    return baselines.get(ticker, {"weekly_avg_visits": 0, "source": "unknown"})
 
 
 if __name__ == "__main__":

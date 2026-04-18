@@ -62,32 +62,32 @@ def detect_vehicles_optical(aoi_path: str, target_date: str, output_base: str = 
     
     Note: Requires cloud-free Sentinel-2 or commercial imagery.
     """
-    # TODO: Implement vehicle detection
-    # Options:
-    # 1. YOLO model trained on parking lot imagery
-    # 2. Simple brightness threshold on asphalt
-    # 3. Pre-trained object detection model
+    from pipeline.detection_vehicles import count_vehicles_in_parking_lots
     
-    detections = []
-    
-    # Placeholder: Load Sentinel-2 and run detection
-    # In production, this would:
-    # 1. Load Sentinel-2 scene for AOI
-    # 2. Apply vehicle detection model
-    # 3. Filter by parking lot polygons
-    # 4. Count vehicles per lot
-    
-    return DetectionResult(
-        detection_type="vehicles_optical",
-        date=target_date,
-        count=len(detections),
-        details=detections,
-        metadata={
-            "data_source": "Sentinel-2",
-            "method": "YOLOv8",
-            "note": "Requires cloud-free imagery",
-        },
-    )
+    try:
+        result = count_vehicles_in_parking_lots(aoi_path, target_date, output_base)
+        lot_details = result.get("lots", [])
+        return DetectionResult(
+            detection_type="vehicles_optical",
+            date=target_date,
+            count=result.get("total_vehicles", 0),
+            details=lot_details,
+            metadata={
+                "data_source": "Sentinel-2",
+                "method": "brightness_threshold" if lot_details else "none",
+                "total_lots": len(lot_details),
+            },
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Vehicle optical detection failed: %s", e)
+        return DetectionResult(
+            detection_type="vehicles_optical",
+            date=target_date,
+            count=0,
+            details=[],
+            metadata={"error": str(e)},
+        )
 
 
 def detect_tank_levels(aoi_path: str, target_date: str, output_base: str = "outputs") -> DetectionResult:
@@ -204,13 +204,26 @@ def detect_containers_port(aoi_path: str, target_date: str, output_base: str = "
     2. Optical for container stack height
     3. Crane activity detection
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     detections = []
     
-    # TODO: Implement port activity detection
-    # In production:
-    # 1. Count ships in anchorage vs berthed
-    # 2. Estimate container stack density
-    # 3. Detect crane positions (working vs idle)
+    try:
+        ships = detect_ships_sar(aoi_path, target_date, output_base)
+        
+        berthed = [d for d in ships.details if d.get("location") == "berth"]
+        anchored = [d for d in ships.details if d.get("location") == "anchorage"]
+        
+        detections.append({
+            "type": "ship_summary",
+            "total_ships": ships.count,
+            "berthed": len(berthed),
+            "anchored": len(anchored),
+            "berth_utilization": len(berthed) / max(len(berthed) + len(anchored), 1),
+        })
+    except Exception as e:
+        logger.warning("SAR ship detection failed for port: %s", e)
     
     return DetectionResult(
         detection_type="port_activity",
@@ -218,8 +231,9 @@ def detect_containers_port(aoi_path: str, target_date: str, output_base: str = "
         count=len(detections),
         details=detections,
         metadata={
-            "data_source": "Sentinel-1 + Sentinel-2",
-            "method": "multi_sensor",
+            "data_source": "Sentinel-1 SAR",
+            "method": "cfar_ship_detection",
+            "note": "Container/crane detection pending Phase B",
         },
     )
 

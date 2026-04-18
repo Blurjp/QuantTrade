@@ -139,8 +139,8 @@ PASTURE_REGIONS = {
 
 # Instruments for trading signals
 INSTRUMENTS = {
-    "beef_bullish": ["COW", "LE=F"],   # Long cattle on supply tightness
-    "beef_bearish": ["COW", "LE=F"],    # Short cattle on oversupply
+    "beef_bullish": ["LE=F", "CORN", "SOYB"],   # Long cattle on supply tightness, feed costs rise
+    "beef_bearish": ["LE=F", "CORN", "SOYB"],    # Short cattle on oversupply, feed costs drop
     "feed_proxy": ["CORN", "SOYB"],      # Corn/soy as feed cost
 }
 

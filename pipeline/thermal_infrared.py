@@ -159,7 +159,7 @@ class ThermalInfraredMonitor:
                 "location": "Cactus-Hereford-Dalhart, TX",
                 "type": "cattle_feedlot",
                 "bbox": [-102.8, 35.1, -101.1, 36.6],
-                "instruments": ["COW", "CORN"],
+                "instruments": ["LE=F", "CORN", "SOYB"],
                 "description": "Largest US feedlot concentration (30% of US capacity)",
                 "normal_temp_range": [20, 45],
                 "activity_threshold": 30
@@ -169,7 +169,7 @@ class ThermalInfraredMonitor:
                 "location": "Dodge City-Garden City, KS",
                 "type": "cattle_feedlot",
                 "bbox": [-101.1, 37.1, -99.8, 38.4],
-                "instruments": ["COW", "CORN"],
+                "instruments": ["LE=F", "CORN", "SOYB"],
                 "description": "Major Kansas feedlot region (20% of US capacity)",
                 "normal_temp_range": [18, 42],
                 "activity_threshold": 28
@@ -179,7 +179,7 @@ class ThermalInfraredMonitor:
                 "location": "Lexington-Grand Island, NE",
                 "type": "cattle_feedlot",
                 "bbox": [-100.2, 40.3, -98.3, 41.3],
-                "instruments": ["COW", "CORN"],
+                "instruments": ["LE=F", "CORN", "SOYB"],
                 "description": "Nebraska feedlot corridor (15% of US capacity)",
                 "normal_temp_range": [15, 40],
                 "activity_threshold": 25

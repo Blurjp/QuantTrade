@@ -22,39 +22,109 @@ logger = logging.getLogger(__name__)
 # Fallback prices (used when API unavailable)
 # Last updated: 2026-03-09 (from Yahoo Finance)
 DEFAULT_PRICES = {
-    # Commodities
+    # Commodities / Commodity ETFs
     "WTI": 86.0,
     "Brent": 89.0,
     "Natural Gas": 2.50,
     "Corn": 4.50,
     "Soybeans": 10.50,
     "Wheat": 5.50,
+    "CORN": 18.0,
+    "SOYB": 25.0,
+    "WEAT": 22.0,
+    "UNG": 11.0,
+    "USO": 116.0,
+    "BNO": 45.0,
+    "BTU": 26.0,
+    "WOOD": 73.0,
     
-    # Equities
+    # Energy ETFs
+    "XLE": 85.0,
+    "XOP": 160.0,
+    "OIH": 400.0,
+    "VLO": 224.0,
+    "MPC": 214.0,
+    "PSX": 156.0,
+    "CVX": 184.0,
+    "XOM": 146.0,
+    "FANG": 180.0,
+    "VST": 163.0,
+    
+    # Industrial / Sector ETFs
+    "XLI": 171.0,
+    "XLK": 154.0,
+    "XLU": 46.0,
+    "FXD": 70.0,
+    "NUE": 196.0,
+    "STLD": 200.0,
+    "CAT": 795.0,
+    "DE": 590.0,
+    
+    # Tech / Solar ETFs
+    "TAN": 55.0,
+    "ICLN": 19.0,
+    "PBW": 36.0,
+    "QCLN": 54.0,
+    "FSLR": 190.0,
+    "ENPH": 32.0,
+    "SEDG": 38.0,
+    "SPWR": 1.2,
+    "NEE": 92.0,
+    "TECL": 134.0,
+    
+    # International ETFs
+    "FXI": 38.0,
+    "MCHI": 59.0,
+    "KWEB": 30.0,
+    "ASHR": 35.0,
+    "INDA": 51.0,
+    "EPI": 45.0,
+    "EWG": 43.0,
+    "EPOL": 41.0,
+    
+    # Tech equities
+    "INTC": 69.0,
+    "TSM": 371.0,
+    "AMD": 278.0,
+    "NVDA": 202.0,
+    "MSFT": 423.0,
+    "GOOGL": 342.0,
+    "META": 689.0,
+    "AMZN": 251.0,
+    "QQQ": 649.0,
+    
+    # Auto / Retail
+    "F": 13.0,
+    "GM": 81.0,
+    "STLA": 9.0,
+    "FB": 43.0,
+    "FMC": 17.0,
+    
+    # Utilities
+    "AEP": 134.0,
+    "D": 62.0,
+    "DUK": 128.0,
+    "PEG": 82.0,
+    
+    # Legacy equities
     "WMT": 124.0,
     "COST": 1005.0,
     "TGT": 120.0,
     "HD": 360.0,
-    "F": 12.20,
-    "GM": 75.0,
     "TM": 185.0,
-    "CAT": 340.0,
-    "DE": 420.0,
     "FDX": 260.0,
     "UPS": 155.0,
-    
-    # ETFs
-    "XLE": 85.0,
-    "XLI": 171.0,
     "XRT": 80.0,
     "CARZ": 28.0,
-    "USO": 75.0,
+    
+    # Livestock (COW delisted, use LE futures proxy)
+    "LE": 160.0,  # CME Live Cattle
 }
 
 SYMBOL_ALIASES = {
-    "CORN": "Corn",
-    "SOYB": "Soybeans",
-    "WEAT": "Wheat",
+    "CORN": "CORN",
+    "SOYB": "SOYB",
+    "WEAT": "WEAT",
 }
 
 

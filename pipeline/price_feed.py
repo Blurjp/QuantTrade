@@ -331,3 +331,4 @@ if __name__ == "__main__":
         for ticker in tickers:
             price = prices.get(ticker, 0)
             print(f"  {ticker:>12}: ${price:,.2f}")
+# Force rebuild Sat Apr 18 20:51:01 EDT 2026

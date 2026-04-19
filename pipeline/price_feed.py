@@ -204,7 +204,7 @@ def fetch_price_alpha_vantage(ticker: str, api_key: str = None) -> Optional[floa
 
 def fetch_all_prices(
     tickers: list = None,
-    use_cache: bool = True,
+    use_cache: bool = False,
     cache_ttl_seconds: int = 600,
 ) -> Dict[str, float]:
     """

@@ -1612,405 +1612,129 @@ def main():
         page_icon="📊"
     )
     
-    # Auto-refresh every 15 minutes (900 seconds)
-    # Users can disable this in sidebar
-    if "auto_refresh" not in st.session_state:
-        st.session_state.auto_refresh = True
-    
-    st.title("QuantTrade Trading Console")
-    st.caption("把关键海运通道的船流数据翻译成更容易理解的交易信号。")
+    st.title("QuantTrade")
+    st.caption("Satellite-based trading signals → paper trading portfolio")
 
-    # Render portfolio monitor at the top
-    _render_portfolio_monitor(st)
-
-    output_base = st.sidebar.text_input("Outputs Directory", "outputs")
-    api_base = st.sidebar.text_input("Backend API", os.environ.get("SCHEDULER_API_URL", "http://127.0.0.1:8000"))
-    
-    # Auto-refresh control
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🔄 Auto Refresh")
-    auto_refresh = st.sidebar.checkbox("Enable Auto Refresh", value=st.session_state.get("auto_refresh", True))
-    refresh_interval = st.sidebar.slider("Refresh Interval (seconds)", 60, 1800, 900, 60)
-    st.session_state.auto_refresh = auto_refresh
-    st.session_state.refresh_interval = refresh_interval
-    
-    use_backend = st.sidebar.checkbox("Use backend service", value=False)
+    output_base = os.environ.get("OUTPUT_BASE", "outputs")
+    api_base = os.environ.get("SCHEDULER_API_URL", "http://127.0.0.1:8000")
     regions = list_regions()
     region_options = {region["name"]: region["id"] for region in regions}
+
+    # Minimal sidebar: just region selector
     selected_region_name = st.sidebar.selectbox("Region", options=list(region_options.keys()))
     selected_region = region_options[selected_region_name]
-    region_meta = next(region for region in regions if region["id"] == selected_region)
-    st.sidebar.caption(region_meta["description"])
 
-    days = []
-    if use_backend:
-        try:
-            response = requests.get(
-                f"{api_base.rstrip('/')}/days",
-                params={"output_base": output_base, "region": selected_region},
-                timeout=15,
-            )
-            response.raise_for_status()
-            days = response.json().get("days", [])
-            st.sidebar.success("Backend connected")
-        except requests.RequestException as exc:
-            st.sidebar.warning(f"Backend unavailable, using local files: {exc}")
-            use_backend = False
-
-    if not use_backend:
-        days = list_available_days(output_base, selected_region)
-
-    # Also try scheduler API for days if local is empty
-    if not days:
-        api_dates = _fetch_from_scheduler("/api/dates")
-        if api_dates and api_dates.get("dates"):
-            days = api_dates["dates"]
-
-    if not days:
-        st.warning("No completed day runs found. Run `python -m pipeline.run --date YYYY-MM-DD` first.")
-        return
-
-    selected_day = st.sidebar.selectbox("Day", options=list(reversed(days)))
-    if use_backend:
-        bundle = _load_remote_bundle(api_base, selected_day, output_base, selected_region)
+    # Resolve latest day
+    api_days = _fetch_from_scheduler("/api/days")
+    if api_days and isinstance(api_days, list) and len(api_days) > 0:
+        days = api_days
     else:
-        region_output_base = resolve_region_output_base(output_base, selected_region)
-        bundle = load_day_bundle(str(Path(region_output_base) / selected_day))
-        bundle["calibration_metrics"] = pd.DataFrame()
-        bundle["calibration_report"] = {}
-
-    paths = bundle["paths"]
-    metrics_df = bundle["metrics"]
-    detections_df = bundle["detections"]
-    load_log_df = bundle["load_log"]
-    manifest_df = bundle["manifest"]
-    report = bundle["report"]
-    calibration_df = bundle["calibration_metrics"]
-    calibration_report = bundle["calibration_report"]
-    metrics_row = metrics_df.iloc[0].to_dict() if len(metrics_df) > 0 else {}
-    # Get trade signal - try scheduler API first for Railway deployment
-    api_signals = _fetch_from_scheduler("/api/all-signals")
-    trade_signal = None
-    if api_signals and api_signals.get("signals") and selected_region in api_signals["signals"]:
-        sig = api_signals["signals"][selected_region]
-        trade_signal = {
-            "date": selected_day,
-            "source": "api",
-            "signal": sig.get("signal", "No data"),
-            "bias": _bias_for_signal(sig.get("signal", "No data")),
-            "confidence": sig.get("confidence", "Unknown"),
-            "signal_strength": sig.get("signal_strength"),
-            "coverage_score": sig.get("coverage_score"),
-            "throughput_index_corrected": sig.get("throughput_change"),
-            "baseline_value": sig.get("baseline_value"),
-            "dod_change": sig.get("throughput_change"),
-            "dod_change_pct": sig.get("throughput_change_pct"),
-            "confirmation_days": 0,
-            "zscore": None,
-            "reroute_flag": sig.get("reroute_flag", False),
-            "actionability": sig.get("actionability", "Ignore"),
-            "signal_source": sig.get("type", "unknown"),
-            "rationale": sig.get("rationale", "Signal from scheduler API."),
-        }
-    if trade_signal is None:
-        trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
-    region_instruments = list_region_instruments(selected_region)
-    trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
+        days = list_available_days(output_base, selected_region)
+    if not days:
+        st.warning("No data available yet. Run the pipeline first.")
+        return
+    selected_day = days[-1]
     summary_day = _resolve_summary_day(output_base, selected_day)
-    daily_summary = _load_daily_summary(output_base, selected_day)
 
-    _render_ranked_today_board(st, selected_day, daily_summary, output_base)
-    with st.expander("当前区域详情", expanded=False):
-        _render_summary_header(st, selected_day, trade_signal, metrics_row, summary_day=summary_day)
-    _render_trade_ticket(st, trade_ticket)
-    _render_how_to_use(st)
-
-    # Sidebar chat — rendered after all data is loaded so context is complete
-    persistence_state = _load_persistence_state(output_base)
-    brief_text_for_chat = _load_daily_brief(output_base, summary_day)
-    _render_sidebar_chat(
-        st,
-        daily_summary=daily_summary,
-        persistence_state=persistence_state,
-        daily_brief=brief_text_for_chat,
-        selected_day=summary_day,
+    # --- 4 Tabs ---
+    tab_portfolio, tab_signals, tab_trade, tab_backtests = st.tabs(
+        ["Portfolio", "Signals", "Trading", "Backtests"]
     )
 
-    metric_columns = st.columns(5)
-    metric_columns[0].metric("数据覆盖率", _format_pct(metrics_row.get("coverage_score", 0)))
-    metric_columns[1].metric("发现的场景数", int(metrics_row.get("num_scenes", 0)))
-    metric_columns[2].metric("成功加载场景", int(metrics_row.get("loaded_scenes", 0)))
-    metric_columns[3].metric("检测到的船只", int(len(detections_df)))
-    metric_columns[4].metric("最大时间缺口(小时)", metrics_row.get("max_scene_gap_hours", "n/a"))
+    with tab_portfolio:
+        _render_portfolio_monitor(st)
 
-    tab_monitor, tab_brief, tab_today, tab_trade, tab_backtests, tab_signal, tab_detections, tab_scenes, tab_files = st.tabs(
-        ["Monitor", "Brief", "Today", "Trading", "Backtests", "Signal", "Detections", "Previews", "Files"]
-    )
-
-    with tab_monitor:
+    with tab_signals:
         _render_global_monitor(st, regions, output_base)
-
-    with tab_brief:
-        st.markdown("**每日中文简报**")
+        st.markdown("---")
+        st.markdown("### 每日简报")
         brief_text = _load_daily_brief(output_base, summary_day)
         if brief_text:
             st.markdown(brief_text)
             st.download_button(
-                "Download Chinese Brief",
+                "Download Brief",
                 brief_text.encode("utf-8"),
                 file_name=f"{summary_day}_daily_brief_zh.md",
                 mime="text/markdown",
             )
         else:
-            st.info("这个日期还没有生成中文简报。先运行 `scripts/china_daily_brief.py` 或 Railway 日任务。")
-
-        dashboard_path = Path(output_base) / summary_day / "signals_dashboard.html"
-        if dashboard_path.exists():
-            st.markdown("**Dashboard 文件**")
-            st.code(str(dashboard_path))
-
-        persistence_state = _load_persistence_state(output_base)
-        if persistence_state:
-            st.markdown("**信号确认状态**")
-            st.json(persistence_state)
-
-    with tab_today:
-        st.markdown("**今天到底能不能用**")
-        if metrics_row.get("num_scenes", 0) == 0:
-            st.error("今天没有可用卫星场景。这一天不能拿来做交易判断。")
-        elif _coverage_confidence(metrics_row.get("coverage_score")) == "Low":
-            st.warning("今天虽然有数据，但覆盖太差。更适合观望。")
-        else:
-            st.success("今天有可参考数据，可以继续看 Trading 页。")
-
-        quick_cols = st.columns(2)
-        with quick_cols[0]:
-            st.markdown("**给交易看的结论**")
-            if trade_ticket is None:
-                st.write("没有校准信号。")
-            else:
-                st.write(f"- 主交易: {trade_ticket['primary_trade']}")
-                st.write(f"- 仓位: {trade_ticket['position_size']}")
-                st.write(f"- 失效条件: {trade_ticket['invalidation']}")
-        with quick_cols[1]:
-            st.markdown("**给研究看的背景**")
-            st.write("- `coverage_score`: 今天数据完整不完整")
-            st.write("- `throughput_index_corrected`: 校准后的船流强度")
-            st.write("- `dod_change_pct`: 比昨天变化了多少")
-            if region_instruments:
-                st.write(f"- 主要交易标的: {', '.join(item['ticker'] for item in region_instruments)}")
-
-        with st.expander("查看原始日报数据"):
-            st.markdown("**Daily Metrics**")
-            st.dataframe(metrics_df, width="stretch")
-            st.markdown("**Scene Load Log**")
-            st.dataframe(load_log_df, width="stretch")
-            st.markdown("**Manifest**")
-            st.dataframe(manifest_df, width="stretch")
+            st.info("暂无简报。")
 
     with tab_trade:
+        use_backend = bool(_fetch_from_scheduler("/health"))
+        bundle = load_day_bundle(
+            output_base=output_base,
+            region_id=selected_region,
+            selected_day=selected_day,
+            api_base=api_base,
+            use_backend=use_backend,
+        )
+        trade_signal = None
+        api_signals = _fetch_from_scheduler("/api/all-signals")
+        if api_signals and api_signals.get("signals") and selected_region in api_signals["signals"]:
+            sig = api_signals["signals"][selected_region]
+            trade_signal = {
+                "date": selected_day,
+                "source": "api",
+                "signal": sig.get("signal", "No data"),
+                "bias": _bias_for_signal(sig.get("signal", "No data")),
+                "confidence": sig.get("confidence", "Unknown"),
+                "signal_strength": sig.get("signal_strength"),
+                "coverage_score": sig.get("coverage_score"),
+                "throughput_index_corrected": sig.get("throughput_change"),
+                "baseline_value": sig.get("baseline_value"),
+                "dod_change": sig.get("throughput_change"),
+                "dod_change_pct": sig.get("throughput_change_pct"),
+                "confirmation_days": 0,
+                "zscore": None,
+                "rolling_mean_7": None,
+                "rationale": sig.get("rationale", "Signal from scheduler API."),
+                "series": pd.DataFrame(),
+                "reroute_flag": sig.get("reroute_flag", False),
+                "actionability": sig.get("actionability", "Ignore"),
+                "signal_source": sig.get("type", "unknown"),
+            }
         if trade_signal is None:
-            st.info("No calibrated signal is available for trade classification.")
-        else:
-            if trade_signal["source"] == "latest_available":
-                st.caption(
-                    f"No calibrated row exists for {selected_day}; showing latest available signal from {trade_signal['date']}."
-                )
+            trade_signal = latest_region_signal(selected_region, output_base=output_base, selected_day=selected_day, version="v2")
+        region_instruments = list_region_instruments(selected_region)
+        trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
 
-            trade_cols = st.columns(4)
-            trade_cols[0].metric("今日建议", trade_signal["signal"])
-            trade_cols[1].metric("置信度", trade_signal["confidence"])
-            signal_label = "校准后船流强度" if trade_signal.get("signal_source") == "throughput_index_corrected" else "原始船流强度"
-            trade_cols[2].metric(signal_label, _format_num(trade_signal["throughput_index_corrected"]))
-            trade_cols[3].metric("日变化", _format_pct(trade_signal["dod_change_pct"]))
+        _render_trade_ticket(st, trade_ticket)
 
-            explain_cols = st.columns(2)
-            with explain_cols[0]:
-                st.markdown("**交易含义**")
-                instrument_text = ", ".join(
-                    f"{item['ticker']} ({item['trade_direction_on_low_throughput']}/{item['trade_direction_on_high_throughput']})"
-                    for item in region_instruments
-                ) or "n/a"
-                st.write(f"推荐标的: {instrument_text}")
-                st.markdown("**触发原因**")
-                st.write(trade_signal["rationale"])
-            with explain_cols[1]:
-                st.markdown("**规则输入**")
-                st.json(
-                    {
-                        "date": trade_signal["date"],
-                        "coverage_score": trade_signal["coverage_score"],
-                        "throughput_index_corrected": trade_signal["throughput_index_corrected"],
-                        "rolling_mean_7": trade_signal["rolling_mean_7"],
-                        "dod_change": trade_signal["dod_change"],
-                        "dod_change_pct": trade_signal["dod_change_pct"],
-                    }
-                )
-
+        if trade_signal and trade_signal.get("series") is not None and not trade_signal["series"].empty:
             signal_series = trade_signal["series"].copy()
             plot_columns = [
-                column
-                for column in ["throughput_index_corrected", "rolling_mean_7", "coverage_score"]
-                if column in signal_series.columns
+                c for c in ["throughput_index_corrected", "rolling_mean_7", "coverage_score"]
+                if c in signal_series.columns
             ]
-            st.markdown("**历史上下文**")
-            st.caption("看当前信号是不是只是单日噪音。")
-            st.line_chart(signal_series.set_index("date")[plot_columns], width="stretch")
-
-            export_columns = [
-                column
-                for column in [
-                    "date",
-                    "signal",
-                    "confidence",
-                    "bias",
-                    "throughput_index_corrected",
-                    "coverage_score",
-                    "dod_change",
-                    "dod_change_pct",
-                    "rolling_mean_7",
-                    "rationale",
-                ]
-                if column in signal_series.columns
-            ]
-            export_df = signal_series[export_columns].copy()
-            export_df["date"] = export_df["date"].dt.date.astype(str)
-            export_df = export_df.rename(
-                columns={
-                    "throughput_index_corrected": "corrected_throughput",
-                    "coverage_score": "coverage",
-                }
-            )
-
-            st.markdown("**每日交易信号表**")
-            st.caption("你真正可以导出去做后续研究或交易流程的表。")
-            st.dataframe(export_df.sort_values("date", ascending=False), width="stretch")
-            st.download_button(
-                "Download signal CSV",
-                export_df.to_csv(index=False).encode("utf-8"),
-                file_name="quanttrade_daily_signals.csv",
-                mime="text/csv",
-            )
+            if plot_columns:
+                st.markdown("**Signal History**")
+                st.line_chart(signal_series.set_index("date")[plot_columns], use_container_width=True)
 
     with tab_backtests:
         summaries = _load_latest_backtests(output_base, selected_region)
         if not summaries:
-            st.info("No backtest artifacts found for this region yet.")
+            st.info("No backtest results yet.")
         else:
             summary_df = pd.DataFrame(summaries)
-            st.markdown("**Latest Backtest Summaries**")
+            st.markdown("**Backtest Results**")
             summary_columns = [
-                column
-                for column in [
-                    "symbol",
-                    "strategy_name",
-                    "total_return",
-                    "sharpe",
-                    "max_drawdown",
-                    "win_rate",
-                    "profit_factor",
-                    "trade_count",
-                ]
-                if column in summary_df.columns
+                c for c in ["symbol", "strategy_name", "total_return", "sharpe", "max_drawdown", "win_rate", "profit_factor", "trade_count"]
+                if c in summary_df.columns
             ]
-            st.dataframe(summary_df[summary_columns] if summary_columns else summary_df, width="stretch")
+            st.dataframe(summary_df[summary_columns] if summary_columns else summary_df, use_container_width=True)
             selected_summary = summaries[0]
             equity_path_value = selected_summary.get("equity_path")
             if equity_path_value and Path(equity_path_value).exists():
-                equity_path = Path(equity_path_value)
-                equity_df = pd.read_parquet(equity_path)
+                equity_df = pd.read_parquet(Path(equity_path_value))
                 if "date" in equity_df.columns:
                     equity_df["date"] = pd.to_datetime(equity_df["date"])
                     st.markdown("**Equity Curve**")
-                    st.line_chart(equity_df.set_index("date")[["equity_curve"]], width="stretch")
+                    st.line_chart(equity_df.set_index("date")[["equity_curve"]], use_container_width=True)
                     st.markdown("**Drawdown**")
-                    st.line_chart(equity_df.set_index("date")[["drawdown"]], width="stretch")
+                    st.line_chart(equity_df.set_index("date")[["drawdown"]], use_container_width=True)
             else:
-                st.caption("This backtest summary does not include an equity curve artifact.")
-
-    with tab_signal:
-        if len(calibration_df) == 0:
-            st.info("No calibrated signal series found in outputs/calibration.")
-        else:
-            plot_df = calibration_df.copy()
-            if "date" in plot_df.columns:
-                plot_df["date"] = pd.to_datetime(plot_df["date"])
-                plot_df = plot_df.sort_values("date")
-
-            signal_columns = [
-                column
-                for column in [
-                    "throughput_index_corrected",
-                    "throughput_index_total",
-                    "coverage_score",
-                    "bias_factor",
-                ]
-                if column in plot_df.columns
-            ]
-            if signal_columns:
-                st.line_chart(plot_df.set_index("date")[signal_columns], width="stretch")
-            st.caption("这页是底层信号，不是结论页。主要用来看趋势，不要直接拿表格下单。")
-            with st.expander("Calibration Report"):
-                st.json(calibration_report or {"status": "missing"})
-            with st.expander("Calibrated Metrics"):
-                st.dataframe(plot_df, width="stretch")
-
-    with tab_detections:
-        if len(detections_df) == 0:
-            st.info("今天没有检测到船只，或者当天没有可用场景。")
-        else:
-            st.dataframe(detections_df, width="stretch")
-            st.download_button(
-                "Download detections CSV",
-                detections_df.to_csv(index=False).encode("utf-8"),
-                file_name=f"{selected_day}_detections.csv",
-                mime="text/csv",
-            )
-
-    with tab_scenes:
-        previews = paths["previews"]
-        if not previews:
-            st.info("今天没有场景预览图。")
-        else:
-            for preview in previews:
-                st.image(str(preview), caption=preview.stem, width="stretch")
-
-    with tab_files:
-        info_columns = st.columns(2)
-        with info_columns[0]:
-            st.markdown("**Run Report**")
-            st.json(report or {"status": "missing"})
-        with info_columns[1]:
-            st.markdown("**Artifact Paths**")
-            st.code(
-                "\n".join(
-                    f"{name}: {value}"
-                    for name, value in paths.items()
-                    if name != "previews"
-                )
-            )
-        for preview in paths["previews"]:
-            st.write(str(preview))
-    
-    # Auto-refresh logic at the end
-    if st.session_state.get("auto_refresh", True):
-        import time
-        refresh_interval = st.session_state.get("refresh_interval", 900)
-        
-        st.markdown("---")
-        st.info(f"🔄 Auto-refreshing in {refresh_interval} seconds...")
-        
-        # Show countdown
-        countdown_placeholder = st.empty()
-        for i in range(refresh_interval, 0, -1):
-            mins, secs = divmod(i, 60)
-            countdown_placeholder.markdown(
-                f"⏱️ Refreshing in **{mins}m {secs}s**..."
-            )
-            time.sleep(1)
-        
-        # Trigger rerun
-        st.rerun()
+                st.caption("No equity curve data for this backtest.")
 
 
 if __name__ == "__main__":

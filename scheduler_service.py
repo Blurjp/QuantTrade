@@ -701,8 +701,19 @@ def run_daily_pipeline():
                     all_signal_tickers.add(inst)
 
         # Fetch prices for signal tickers
-        from pipeline.price_feed import fetch_all_prices
+        from pipeline.price_feed import fetch_all_prices, DEFAULT_PRICES
         signal_prices = fetch_all_prices(list(all_signal_tickers))
+        
+        # Debug: check what we got vs what we need
+        missing_from_cache = [t for t in all_signal_tickers if t not in signal_prices or not signal_prices[t]]
+        if missing_from_cache:
+            logger.info(f"  Prices missing for {len(missing_from_cache)} tickers: {list(missing_from_cache)[:10]}")
+            # Force-fill from DEFAULT_PRICES
+            for t in missing_from_cache:
+                if t in DEFAULT_PRICES and DEFAULT_PRICES[t] > 0:
+                    signal_prices[t] = DEFAULT_PRICES[t]
+                    logger.info(f"    Fallback: {t} = {DEFAULT_PRICES[t]}")
+        
         prices = get_prices_for_portfolio(portfolio)
         prices.update({k: v for k, v in signal_prices.items() if v})
         trades_made = 0

@@ -121,15 +121,13 @@ DEFAULT_PRICES = {
     "LE": 160.0,  # CME Live Cattle
 }
 
-SYMBOL_ALIASES = {
-    "CORN": "CORN",
-    "SOYB": "SOYB",
-    "WEAT": "WEAT",
-}
+# Removed SYMBOL_ALIASES - all tickers use their yfinance names directly
+# DEFAULT_PRICES keys match yfinance ticker names exactly
 
 
 def _normalize_ticker(ticker: str) -> str:
-    return SYMBOL_ALIASES.get(ticker, ticker)
+    # No normalization - use ticker as-is
+    return ticker
 
 
 def fetch_price_yahoo(ticker: str) -> Optional[float]:

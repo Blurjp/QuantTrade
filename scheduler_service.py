@@ -700,22 +700,18 @@ def run_daily_pipeline():
                 if isinstance(inst, str):
                     all_signal_tickers.add(inst)
 
-        # Fetch prices for signal tickers
-        from pipeline.price_feed import fetch_all_prices, DEFAULT_PRICES
+        # Fetch prices for signal tickers - REAL prices only
+        from pipeline.price_feed import fetch_all_prices
         signal_prices = fetch_all_prices(list(all_signal_tickers))
         
-        # Debug: check what we got vs what we need
-        missing_from_cache = [t for t in all_signal_tickers if t not in signal_prices or not signal_prices[t]]
-        if missing_from_cache:
-            logger.info(f"  Prices missing for {len(missing_from_cache)} tickers: {list(missing_from_cache)[:10]}")
-            # Force-fill from DEFAULT_PRICES
-            for t in missing_from_cache:
-                if t in DEFAULT_PRICES and DEFAULT_PRICES[t] > 0:
-                    signal_prices[t] = DEFAULT_PRICES[t]
-                    logger.info(f"    Fallback: {t} = {DEFAULT_PRICES[t]}")
+        # Debug: log which tickers got prices and which didn't
+        got_price = {t: p for t, p in signal_prices.items() if p and p > 0}
+        no_price = [t for t in all_signal_tickers if t not in got_price]
+        if no_price:
+            logger.info(f"  No real price for {len(no_price)} tickers: {no_price[:15]}")
         
         prices = get_prices_for_portfolio(portfolio)
-        prices.update({k: v for k, v in signal_prices.items() if v})
+        prices.update({k: v for k, v in got_price.items()})
         trades_made = 0
 
         # Initialize risk manager

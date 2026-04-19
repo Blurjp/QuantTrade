@@ -147,18 +147,21 @@ def fetch_price_yahoo(ticker: str) -> Optional[float]:
         }.get(ticker, ticker)  # Use original ticker, not normalized
         
         stock = yf.Ticker(yahoo_ticker)
-        hist = stock.history(period="1d")
+        hist = stock.history(period="5d")  # Try 5d instead of 1d for more reliability
         
         if not hist.empty:
-            return float(hist['Close'].iloc[-1])
+            price = float(hist['Close'].iloc[-1])
+            logger.debug("yfinance %s -> %s = $%.2f", ticker, yahoo_ticker, price)
+            return price
         
+        logger.debug("yfinance %s -> %s: no history data returned", ticker, yahoo_ticker)
         return None
     
     except ImportError:
         logger.debug("yfinance not installed; using fallback price for %s", ticker)
         return None
     except Exception as e:
-        logger.warning("Error fetching %s from Yahoo: %s", ticker, e)
+        logger.debug("Error fetching %s from Yahoo: %s", ticker, e)
         return None
 
 
@@ -202,7 +205,7 @@ def fetch_price_alpha_vantage(ticker: str, api_key: str = None) -> Optional[floa
 def fetch_all_prices(
     tickers: list = None,
     use_cache: bool = True,
-    cache_ttl_seconds: int = 3600,
+    cache_ttl_seconds: int = 600,
 ) -> Dict[str, float]:
     """
     Fetch prices for all tracked instruments.
@@ -232,18 +235,12 @@ def fetch_all_prices(
     prices = {}
     
     for ticker in tickers:
-        # Try Yahoo first
+        # Try Yahoo first - REAL PRICES ONLY
         price = fetch_price_yahoo(ticker)
         
-        if price is None:
-            # Fall back to default
-            price = DEFAULT_PRICES.get(_normalize_ticker(ticker))
-        
-        if price is not None:
+        if price is not None and price > 0:
             prices[ticker] = price
-        else:
-            # Use default if all else fails
-            prices[ticker] = DEFAULT_PRICES.get(_normalize_ticker(ticker), 0)
+        # No fallback to fake prices - if yfinance can't get it, skip it
         
         # Rate limiting
         time.sleep(0.1)

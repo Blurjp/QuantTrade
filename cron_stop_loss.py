@@ -63,7 +63,7 @@ def fetch_prices_batch(tickers: list) -> dict:
 
 
 def check_stop_loss():
-    """Main stop-loss check logic.""""
+    """Main stop-loss check logic."""
 
     portfolio = load_portfolio()
     if not portfolio:

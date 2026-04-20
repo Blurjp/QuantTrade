@@ -151,6 +151,23 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "No portfolio file"}, 404)
 
+        elif self.path == "/api/prices":
+            # Fetch current prices for portfolio tickers
+            try:
+                from pipeline.price_feed import fetch_all_prices
+                portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
+                tickers = []
+                if portfolio_file.exists():
+                    data = json.loads(portfolio_file.read_text())
+                    tickers = list(data.get("positions", {}).keys())
+                if tickers:
+                    prices = fetch_all_prices(tickers)
+                    self._send_json({k: v for k, v in prices.items() if v is not None})
+                else:
+                    self._send_json({})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/positions":
             # Serve current positions summary
             portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"

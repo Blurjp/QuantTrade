@@ -1628,11 +1628,18 @@ def main():
     selected_region_name = st.sidebar.selectbox("Region", options=list(region_options.keys()))
     selected_region = region_options[selected_region_name]
 
-    # Resolve latest day
-    api_days = _fetch_from_scheduler("/api/days")
-    if api_days and isinstance(api_days, list) and len(api_days) > 0:
-        days = api_days
-    else:
+    # Resolve latest day from signals API
+    api_signals = _fetch_from_scheduler("/api/all-signals")
+    days = []
+    if api_signals and api_signals.get("signals"):
+        # Extract unique dates from signals
+        signal_dates = set()
+        for sig in api_signals["signals"].values():
+            d = sig.get("date")
+            if d:
+                signal_dates.add(d)
+        days = sorted(signal_dates)
+    if not days:
         days = list_available_days(output_base, selected_region)
     if not days:
         st.warning("No data available yet. Run the pipeline first.")

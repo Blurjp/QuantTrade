@@ -19,12 +19,35 @@ def _default_registry_path() -> Path:
 
 def load_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:
     path = Path(registry_path) if registry_path else _default_registry_path()
-    if not path.exists():
-        raise FileNotFoundError(f"Registry not found: {path}")
-    raw = path.read_text().strip()
-    if not raw:
-        raise ValueError(f"Registry file is empty: {path}")
-    return json.loads(raw)
+    try:
+        if not path.exists():
+            raise FileNotFoundError(f"Registry not found: {path}")
+        raw = path.read_text().strip()
+        if not raw:
+            raise ValueError(f"Registry file is empty: {path}")
+        return json.loads(raw)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:
+        # Fallback: derive regions from scheduler API signals
+        import os
+        api_url = os.environ.get("SCHEDULER_API_URL", "")
+        if api_url:
+            import requests
+            try:
+                resp = requests.get(f"{api_url}/api/all-signals", timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    signals = data.get("signals", {})
+                    regions = {}
+                    for region_id, sig in signals.items():
+                        regions[region_id] = {
+                            "name": sig.get("region_name", region_id),
+                            "instruments": sig.get("instruments", []),
+                            "active": True,
+                        }
+                    return {"version": 2, "regions": regions}
+            except Exception:
+                pass
+        raise
 
 
 def load_region_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:

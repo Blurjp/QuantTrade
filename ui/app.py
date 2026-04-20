@@ -1620,7 +1620,8 @@ def main():
     try:
         regions = list_regions()
     except Exception as e:
-        st.error(f"Failed to load region registry: {e}")
+        st.error(f"Failed to load regions: {e}")
+        st.info("Make sure the scheduler API is accessible.")
         return
     region_options = {region["name"]: region["id"] for region in regions}
 

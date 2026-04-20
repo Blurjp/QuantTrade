@@ -242,7 +242,7 @@ def _build_trade_ticket(trade_signal: Optional[Dict], region_instruments: List[D
     if trade_signal.get("reroute_flag"):
         why += " | reroute risk detected"
 
-    if coverage < 0.55:
+    if coverage is not None and coverage < 0.55:
         position_size = "No Trade"
         primary_trade = "No Trade"
         direction = "观望"
@@ -1724,6 +1724,26 @@ def main():
         trade_ticket = _build_trade_ticket(trade_signal, region_instruments)
 
         _render_trade_ticket(st, trade_ticket)
+
+        # Show all actionable high-confidence signals across regions
+        if api_signals and api_signals.get("signals"):
+            actionable = []
+            for rid, s in api_signals["signals"].items():
+                cs = s.get("confidence_score", 0)
+                if s.get("actionability") in ("Actionable",) and cs and cs >= 75:
+                    actionable.append({
+                        "Region": s.get("region_name", rid),
+                        "Signal": s.get("signal", ""),
+                        "Confidence": f"{cs:.0f}%",
+                        "Instruments": ", ".join(s.get("instruments", [])),
+                        "Rationale": s.get("rationale", "")[:80],
+                    })
+            if actionable:
+                st.markdown("---")
+                st.markdown(f"**🔥 {len(actionable)} Actionable Signals (confidence ≥ 75%)**")
+                for a in actionable:
+                    st.markdown(f'- **{a["Region"]}** → {a["Signal"]} ({a["Confidence"]}) — {a["Instruments"]}')
+                    st.caption(a["Rationale"])
 
         if trade_signal and trade_signal.get("series") is not None and not trade_signal["series"].empty:
             signal_series = trade_signal["series"].copy()

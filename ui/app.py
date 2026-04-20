@@ -514,11 +514,11 @@ def _load_daily_brief(output_base: str, selected_day: str) -> str:
 SCHEDULER_API_URL = os.environ.get("SCHEDULER_API_URL", "https://scheduler-production-b60f.up.railway.app")
 
 
-def _fetch_from_scheduler(endpoint: str) -> Optional[Dict]:
+def _fetch_from_scheduler(endpoint: str, timeout: int = 10) -> Optional[Dict]:
     """Fetch data from scheduler API (used when running on Railway)."""
     try:
         url = f"{SCHEDULER_API_URL}{endpoint}"
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=timeout)
         if resp.status_code == 200:
             return resp.json()
     except Exception:
@@ -1380,7 +1380,7 @@ def _render_portfolio_monitor(st):
         current_prices = get_prices_for_portfolio(portfolio_model)
     else:
         # Web container: fetch prices from scheduler API
-        api_prices = _fetch_from_scheduler("/api/prices")
+        api_prices = _fetch_from_scheduler("/api/prices", timeout=30)
         current_prices = api_prices if isinstance(api_prices, dict) else {}
     
     # Calculate total value and P&L

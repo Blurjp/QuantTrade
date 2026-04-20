@@ -1007,6 +1007,18 @@ def main():
     # Schedule recurring runs
     schedule.every(refresh_interval).minutes.do(run_daily_pipeline)
 
+    # Schedule stop-loss check every 5 minutes during market hours
+    def run_stop_loss_check():
+        try:
+            from cron_stop_loss import check_stop_loss
+            check_stop_loss()
+        except Exception as e:
+            logger.error("Stop-loss check failed: %s", e)
+
+    # Run stop-loss check every 5 minutes (9:30 AM - 4:00 PM ET, Mon-Fri)
+    schedule.every(5).minutes.do(run_stop_loss_check)
+    logger.info("Stop-loss monitor: every 5 minutes during market hours")
+
     while True:
         schedule.run_pending()
         time.sleep(30)

@@ -152,17 +152,30 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "No portfolio file"}, 404)
 
         elif self.path == "/api/prices":
-            # Fetch current prices for portfolio tickers
+            # Fetch current prices for portfolio tickers via batch yfinance
             try:
-                from pipeline.price_feed import fetch_all_prices
+                import yfinance as yf
                 portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
                 tickers = []
                 if portfolio_file.exists():
                     data = json.loads(portfolio_file.read_text())
                     tickers = list(data.get("positions", {}).keys())
                 if tickers:
-                    prices = fetch_all_prices(tickers)
-                    self._send_json({k: v for k, v in prices.items() if v is not None})
+                    batch = yf.download(tickers, period="1d", progress=False)
+                    prices = {}
+                    if not batch.empty:
+                        close = batch["Close"]
+                        if len(tickers) == 1:
+                            val = float(close.iloc[-1])
+                            if val == val:
+                                prices[tickers[0]] = val
+                        else:
+                            for t in tickers:
+                                if t in close.columns:
+                                    val = close[t].iloc[-1]
+                                    if val == val:
+                                        prices[t] = float(val)
+                    self._send_json(prices)
                 else:
                     self._send_json({})
             except Exception as e:

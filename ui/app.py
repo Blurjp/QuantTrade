@@ -1376,7 +1376,28 @@ def _render_portfolio_monitor(st):
         portfolio_model = MultiAssetPortfolio(output_base="outputs")
     except Exception:
         pass
-    current_prices = get_prices_for_portfolio(portfolio_model) if portfolio_model else {}
+    if portfolio_model:
+        current_prices = get_prices_for_portfolio(portfolio_model)
+    else:
+        # Web container: no local portfolio files, fetch prices directly via yfinance batch
+        tickers = list(positions.keys()) if positions else []
+        current_prices = {}
+        if tickers:
+            try:
+                import yfinance as yf
+                data = yf.download(tickers, period="1d", progress=False)
+                if not data.empty:
+                    close = data["Close"]
+                    if len(tickers) == 1:
+                        current_prices[tickers[0]] = float(close.iloc[-1])
+                    else:
+                        for t in tickers:
+                            if t in close.columns:
+                                val = close[t].iloc[-1]
+                                if val == val:  # not NaN
+                                    current_prices[t] = float(val)
+            except Exception:
+                pass
     
     # Calculate total value and P&L
     total_position_value = 0

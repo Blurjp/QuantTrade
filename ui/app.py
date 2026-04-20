@@ -1371,8 +1371,12 @@ def _render_portfolio_monitor(st):
     positions = portfolio.get("positions", {})
     cash = float(portfolio.get("cash", 0))
 
-    portfolio_model = MultiAssetPortfolio(output_base="outputs")
-    current_prices = get_prices_for_portfolio(portfolio_model)
+    portfolio_model = None
+    try:
+        portfolio_model = MultiAssetPortfolio(output_base="outputs")
+    except Exception:
+        pass
+    current_prices = get_prices_for_portfolio(portfolio_model) if portfolio_model else {}
     
     # Calculate total value and P&L
     total_position_value = 0

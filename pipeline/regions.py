@@ -19,8 +19,12 @@ def _default_registry_path() -> Path:
 
 def load_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:
     path = Path(registry_path) if registry_path else _default_registry_path()
-    with open(path) as f:
-        return json.load(f)
+    if not path.exists():
+        raise FileNotFoundError(f"Registry not found: {path}")
+    raw = path.read_text().strip()
+    if not raw:
+        raise ValueError(f"Registry file is empty: {path}")
+    return json.loads(raw)
 
 
 def load_region_registry(registry_path: Optional[Union[str, Path]] = None) -> Dict:

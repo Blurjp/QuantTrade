@@ -1617,7 +1617,11 @@ def main():
 
     output_base = os.environ.get("OUTPUT_BASE", "outputs")
     api_base = os.environ.get("SCHEDULER_API_URL", "http://127.0.0.1:8000")
-    regions = list_regions()
+    try:
+        regions = list_regions()
+    except Exception as e:
+        st.error(f"Failed to load region registry: {e}")
+        return
     region_options = {region["name"]: region["id"] for region in regions}
 
     # Minimal sidebar: just region selector

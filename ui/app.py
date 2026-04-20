@@ -1674,13 +1674,21 @@ def main():
 
     with tab_trade:
         use_backend = bool(_fetch_from_scheduler("/health"))
-        bundle = load_day_bundle(
-            output_base=output_base,
-            region_id=selected_region,
-            selected_day=selected_day,
-            api_base=api_base,
-            use_backend=use_backend,
-        )
+        # Try remote bundle first, then local
+        bundle = None
+        try:
+            bundle = _load_remote_bundle(
+                api_base=api_base,
+                selected_day=selected_day,
+                output_base=output_base,
+                region_id=selected_region,
+            )
+        except Exception:
+            pass
+        if not bundle:
+            day_dir = os.path.join(output_base, selected_region, selected_day)
+            if os.path.isdir(day_dir):
+                bundle = load_day_bundle(day_dir)
         trade_signal = None
         api_signals = _fetch_from_scheduler("/api/all-signals")
         if api_signals and api_signals.get("signals") and selected_region in api_signals["signals"]:

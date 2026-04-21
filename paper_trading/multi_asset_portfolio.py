@@ -32,6 +32,7 @@ class Position:
     unrealized_pnl: float = 0
     signal_accuracy: float = 0
     signal_grade: str = ""
+    region_id: str = ""
 
 
 @dataclass

@@ -207,6 +207,15 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             dates = self._list_available_dates()
             self._send_json({"dates": dates})
 
+        elif self.path == "/api/learning":
+            # Feedback learning summary
+            try:
+                from pipeline.signal_feedback_learner import get_summary
+                summary = get_summary(output_base=OUTPUT_BASE)
+                self._send_json(summary)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         elif self.path.startswith("/api/outputs/"):
             # Serve any file from outputs/ directory
             from urllib.parse import unquote
@@ -707,6 +716,26 @@ def run_daily_pipeline():
             except Exception:
                 continue
 
+        # Apply learned weights — adjust confidence and threshold per region/signal_type
+        try:
+            from pipeline.signal_feedback_learner import should_trade
+            learned_signals = []
+            for sig in actionable_signals:
+                rid = sig.get("region_id", "")
+                stype = sig.get("signal_type", "")
+                raw_conf = sig.get("confidence", 0)
+                ok, eff_conf, reason = should_trade(raw_conf, rid, stype, output_base="outputs")
+                sig["effective_confidence"] = eff_conf
+                sig["learning_reason"] = reason
+                if ok:
+                    learned_signals.append(sig)
+                else:
+                    logger.info(f"  Learning blocked: {rid} raw={raw_conf}% eff={eff_conf:.1f}% — {reason}")
+            logger.info(f"Auto-trade: {len(actionable_signals)} raw → {len(learned_signals)} after learning filter")
+            actionable_signals = learned_signals
+        except Exception as learn_err:
+            logger.warning(f"Feedback learner not available, using static threshold: {learn_err}")
+
         # Deduplicate: keep highest confidence per region+type
         best_signals = {}
         for sig in actionable_signals:
@@ -812,8 +841,11 @@ def run_daily_pipeline():
                     rationale=f"Auto-trade: {sig.get('rationale', '')[:150]}",
                     asset_class=sig.get("signal_type", "commodity"),
                 )
+                # Store region_id on the position for feedback learning
+                if ticker in portfolio.positions:
+                    portfolio.positions[ticker].region_id = sig.get("region_id", "")
                 trades_made += 1
-                logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}%)")
+                logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}% eff={sig.get('effective_confidence','N/A')})")
 
                 # Track position opened
                 if signal_tracker:

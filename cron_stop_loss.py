@@ -154,6 +154,24 @@ def check_stop_loss():
             }
             portfolio.setdefault("trades", []).append(trade)
 
+            # Record outcome for learning
+            try:
+                from pipeline.signal_feedback_learner import record_trade_outcome
+                region_id = pos.get("region_id", ticker)
+                signal_type = pos.get("asset_class", "unknown")
+                record_trade_outcome(
+                    region_id=region_id,
+                    signal_type=signal_type,
+                    direction=direction,
+                    entry_price=entry_price,
+                    exit_price=current_price,
+                    pnl=pnl,
+                    rationale=reason,
+                    output_base=str(OUTPUT_BASE),
+                )
+            except Exception as learn_err:
+                logger.warning("Feedback learning failed: %s", learn_err)
+
             # Remove position
             del portfolio["positions"][ticker]
             closed_any = True

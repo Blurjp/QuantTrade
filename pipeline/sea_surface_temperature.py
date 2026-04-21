@@ -486,7 +486,8 @@ class SeaSurfaceTemperatureMonitor:
             "date": date,
             "signal_type": "sea_surface_temperature",
             "direction": direction,
-            "confidence": confidence,
+            "trade_direction": "neutral",  # SST is context only - trade direction from NDVI/precipitation
+            "confidence": min(confidence, 55),  # Cap SST confidence to avoid overriding direct ag signals
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_sst": current_data["sst_celsius"],

@@ -699,7 +699,8 @@ def run_daily_pipeline():
         for signal_file in sorted(signals_dir.rglob("signal_*.json")):
             try:
                 sig = _json.loads(signal_file.read_text())
-                direction = sig.get("direction", "neutral")
+                # Respect trade_direction override (e.g. SST signals are context-only)
+                direction = sig.get("trade_direction", sig.get("direction", "neutral"))
                 confidence = sig.get("confidence", 0)
                 if direction != "neutral" and confidence >= 75:
                     actionable_signals.append(sig)
@@ -765,7 +766,7 @@ def run_daily_pipeline():
             if trades_made >= 3:
                 break  # Max 3 new positions per run
 
-            direction = sig.get("direction", "neutral")
+            direction = sig.get("trade_direction", sig.get("direction", "neutral"))
             instruments = sig.get("instruments", [])
             if not instruments:
                 continue

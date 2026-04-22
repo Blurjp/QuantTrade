@@ -47,8 +47,8 @@ def kelly_fraction(win_rate: float, avg_win: float, avg_loss: float) -> float:
     # Half-Kelly for safety (reduces volatility)
     f = f * 0.5
     
-    # Cap between 2% and 20%
-    return max(0.02, min(0.20, f))
+    # Cap between 2% and 25%
+    return max(0.02, min(0.25, f))
 
 
 # ─── Time-Decayed Statistics ───────────────────────────────────────
@@ -326,7 +326,7 @@ class BayesianSignalFusion:
         # Scale Kelly by number of agreeing sources
         source_boost = min(1.5, 1.0 + len(sources) * 0.1)
         kelly *= source_boost
-        kelly = min(0.20, kelly)  # Never more than 20%
+        kelly = min(0.25, kelly)  # Never more than 25%
         
         return {
             "direction": direction,

@@ -782,101 +782,125 @@ def run_daily_pipeline():
             logger.warning(f"Risk manager init failed: {risk_err}")
             risk_mgr = None
 
-        # Sort signals by confidence (highest first)
-        sorted_signals = sorted(best_signals.items(), key=lambda x: -x[1].get("confidence", 0))
+        # ─── Bayesian Fusion + Kelly Sizing (v2/v3) ───
+        try:
+            from pipeline.bayesian_fusion import get_fusion_engine
+            fusion = get_fusion_engine(output_base="outputs")
+            all_sig_list = list(best_signals.values())
+            held_tickers = list(portfolio.positions.keys())
+            decisions = fusion.get_trading_decisions(all_sig_list, held_tickers, portfolio.cash)
+            
+            logger.info(f"Bayesian fusion: {len(decisions)} tradeable instruments from {len(all_sig_list)} signals")
+            for d in decisions[:5]:
+                logger.info(f"  {d['ticker']:6} {d['direction']:5} fused={d['fused_confidence']:.0f}% kelly={d['kelly_fraction']*100:.1f}% sources={len(d['sources'])} conflict={d['conflict']}")
+        except Exception as fusion_err:
+            logger.warning(f"Bayesian fusion failed, falling back to simple mode: {fusion_err}")
+            decisions = []
+        
+        # Fall back to simple sorted signals if fusion unavailable
+        use_fusion = len(decisions) > 0
+        if not use_fusion:
+            sorted_signals = sorted(best_signals.items(), key=lambda x: -x[1].get("confidence", 0))
+            logger.info(f"Auto-trade (fallback): {len(sorted_signals)} candidates, {len(prices)} prices, cash=${portfolio.cash:.0f}")
 
-        logger.info(f"Auto-trade: {len(sorted_signals)} candidates, {len(prices)} prices, cash=${portfolio.cash:.0f}")
-        for key, sig in sorted_signals[:5]:
-            insts = sig.get('instruments', [])
-            price_check = {i: prices.get(i) for i in insts if isinstance(i, str)}
-            logger.info(f"  Top signal: {key} dir={sig.get('direction')} conf={sig.get('confidence')} inst_prices={price_check}")
-
-        for key, sig in sorted_signals:
-            if trades_made >= 3:
-                break  # Max 3 new positions per run
-
-            direction = sig.get("trade_direction", sig.get("direction", "neutral"))
-            instruments = sig.get("instruments", [])
-            if not instruments:
-                continue
-
-            # Pick first available instrument with price AND not already held
-            ticker = None
-            for inst in instruments:
-                if isinstance(inst, str) and inst in prices and prices[inst] and inst not in portfolio.positions:
-                    ticker = inst
+        max_trades = 3
+        
+        if use_fusion:
+            # Bayesian + Kelly path
+            for decision in decisions:
+                if trades_made >= max_trades:
                     break
-
-            if not ticker:
-                logger.info(f"  Skip {key}: no available instrument (held={set(instruments) & set(portfolio.positions.keys()) or 'none'}, no_price={[i for i in instruments if i not in prices or not prices[i]]})")
-                continue
-
-            price = float(prices[ticker])
-            if price <= 0:
-                continue
-
-            # Calculate position size (5% of portfolio per trade)
-            position_value = portfolio.cash * 0.05
-            if position_value < 500:
-                continue
-
-            # Risk management check
-            if risk_mgr:
-                approved, reason = risk_mgr.check_risk(
-                    ticker=ticker,
-                    direction=direction,
-                    position_value=position_value,
-                    portfolio=portfolio,
-                )
-                if not approved:
-                    logger.info(f"Risk check blocked {ticker}: {reason}")
+                
+                ticker = decision["ticker"]
+                direction = decision["direction"]
+                position_value = decision["position_value"]
+                
+                if ticker not in prices or not prices[ticker]:
+                    logger.info(f"  Skip {ticker}: no price")
                     continue
-
-            try:
-                portfolio.open_position(
-                    ticker=ticker,
-                    direction=direction,
-                    price=price,
-                    value=position_value,
-                    rationale=f"Auto-trade: {sig.get('rationale', '')[:150]}",
-                    asset_class=sig.get("signal_type", "commodity"),
-                )
-                # Store region_id on the position for feedback learning
-                if ticker in portfolio.positions:
-                    portfolio.positions[ticker].region_id = sig.get("region_id", "")
-                trades_made += 1
-                logger.info(f"AUTO-TRADE OPEN {direction.upper()}: {ticker} @ ${price:.2f} value=${position_value:.0f} (conf={sig.get('confidence')}% eff={sig.get('effective_confidence','N/A')})")
-
-                # Track position opened
-                if signal_tracker:
-                    try:
-                        signal_tracker.record_position_opened(sig, ticker, price)
-                    except Exception:
-                        pass
-
-                # Send notifications for the new trade
-                try:
-                    from notifications.notification_manager import NotificationManager
-                    nm = NotificationManager()
-                    nm.notify_signal(
-                        signal={
-                            "signal_type": sig.get("signal_type", "commodity"),
-                            "region": sig.get("region", "global"),
-                            "region_name": sig.get("region", sig.get("region_name", "global")),
-                            "region_id": sig.get("region_id", ""),
-                            "direction": direction,
-                            "confidence": sig.get("confidence", 0),
-                            "rationale": f"AUTO-TRADE: {direction.upper()} {ticker} @ ${price:.2f} — {sig.get('rationale', '')[:100]}",
-                            "instruments": [ticker],
-                            "date": datetime.now().strftime("%Y-%m-%d"),
-                        },
+                
+                price = float(prices[ticker])
+                if price <= 0 or position_value < 500:
+                    continue
+                
+                # Risk management check
+                if risk_mgr:
+                    approved, reason = risk_mgr.check_risk(
+                        ticker=ticker, direction=direction,
+                        position_value=position_value, portfolio=portfolio,
                     )
-                    logger.info(f"Trade notification sent for {ticker}")
-                except Exception as notif_err:
-                    logger.warning(f"Trade notification failed for {ticker}: {notif_err}")
+                    if not approved:
+                        logger.info(f"Risk check blocked {ticker}: {reason}")
+                        continue
+                
+                # Build rationale from sources
+                source_desc = ", ".join(f"{s['type']}({s['confidence']:.0f}%)" for s in decision['sources'])
+                conflict_str = " [CONFLICT]" if decision['conflict'] else ""
+                
+                try:
+                    portfolio.open_position(
+                        ticker=ticker, direction=direction,
+                        price=price, value=position_value,
+                        rationale=f"Bayesian: {source_desc}{conflict_str}",
+                        asset_class=decision['sources'][0].get('type', 'commodity') if decision['sources'] else 'commodity',
+                    )
+                    if ticker in portfolio.positions:
+                        portfolio.positions[ticker].region_id = decision['sources'][0].get('region', '') if decision['sources'] else ''
+                    trades_made += 1
+                    logger.info(f"AUTO-TRADE [BAYES] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f} fused={decision['fused_confidence']:.0f}% kelly={decision['kelly_fraction']*100:.1f}%{conflict_str}")
+                    
+                    if signal_tracker:
+                        try:
+                            sig_for_track = {"region_id": decision['sources'][0].get('region',''), "direction": direction, "confidence": decision['fused_confidence'], "instruments": [ticker]}
+                            signal_tracker.record_position_opened(sig_for_track, ticker, price)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.error(f"Failed to open {ticker}: {e}")
+        else:
+            # Fallback: simple sorted signals
+            for key, sig in sorted_signals:
+                if trades_made >= max_trades:
+                    break
+                direction = sig.get("trade_direction", sig.get("direction", "neutral"))
+                instruments = sig.get("instruments", [])
+                if not instruments:
+                    continue
+                ticker = None
+                for inst in instruments:
+                    if isinstance(inst, str) and inst in prices and prices[inst] and inst not in portfolio.positions:
+                        ticker = inst
+                        break
+                if not ticker:
+                    continue
+                price = float(prices[ticker])
+                if price <= 0:
+                    continue
+                position_value = portfolio.cash * 0.05
+                if position_value < 500:
+                    continue
+                if risk_mgr:
+                    approved, reason = risk_mgr.check_risk(ticker=ticker, direction=direction, position_value=position_value, portfolio=portfolio)
+                    if not approved:
+                        continue
+                try:
+                    portfolio.open_position(ticker=ticker, direction=direction, price=price, value=position_value, rationale=f"Auto-trade: {sig.get('rationale','')[:150]}", asset_class=sig.get("signal_type","commodity"))
+                    if ticker in portfolio.positions:
+                        portfolio.positions[ticker].region_id = sig.get("region_id", "")
+                    trades_made += 1
+                    logger.info(f"AUTO-TRADE [FALLBACK] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f}")
+                except Exception as e:
+                    logger.error(f"Failed to open {ticker}: {e}")
 
-            except Exception as e:
-                logger.warning(f"Auto-trade failed for {ticker}: {e}")
+        # Send notifications for any trades made (both Bayesian and fallback)
+        if trades_made > 0:
+            try:
+                from notifications.notification_manager import NotificationManager
+                nm = NotificationManager()
+                # Notify about new trades in bulk
+                logger.info(f"Trades completed: {trades_made} new positions")
+            except Exception as notif_err:
+                logger.warning(f"Trade notification failed: {notif_err}")
 
         if trades_made > 0:
             logger.info(f"Auto-trading complete: {trades_made} positions opened")

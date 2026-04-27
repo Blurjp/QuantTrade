@@ -157,10 +157,10 @@ def check_stop_loss():
             # Record outcome for learning
             try:
                 from pipeline.signal_feedback_learner import record_trade_outcome
-                region_id = pos.get("region_id", ticker)
-                signal_type = pos.get("asset_class", "unknown")
+                region_id = pos.get("region_id", "") or pos.get("rationale", "")[:30]
+                signal_type = pos.get("asset_class", pos.get("signal_type", "unknown"))
                 record_trade_outcome(
-                    region_id=region_id,
+                    region_id=region_id or ticker,
                     signal_type=signal_type,
                     direction=direction,
                     entry_price=entry_price,
@@ -169,6 +169,9 @@ def check_stop_loss():
                     rationale=reason,
                     output_base=str(OUTPUT_BASE),
                 )
+                logger.info("Feedback recorded: %s %s %s region=%s type=%s pnl=$%.2f",
+                            ticker, direction, 'WIN' if pnl >= 0 else 'LOSS',
+                            region_id or ticker, signal_type, pnl)
             except Exception as learn_err:
                 logger.warning("Feedback learning failed: %s", learn_err)
 

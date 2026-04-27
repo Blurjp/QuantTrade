@@ -588,6 +588,26 @@ def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
                     except Exception:
                         pass
 
+                # Record outcome for feedback learning
+                try:
+                    from pipeline.signal_feedback_learner import record_trade_outcome
+                    pos_data = portfolio.positions.get(ticker) if hasattr(portfolio, 'positions') else None
+                    region_id = getattr(pos_data, 'region_id', '') if pos_data else ''
+                    asset_class = getattr(pos_data, 'asset_class', 'unknown') if pos_data else 'unknown'
+                    record_trade_outcome(
+                        region_id=region_id or ticker,
+                        signal_type=asset_class,
+                        direction=getattr(pos_data, 'direction', 'long') if pos_data else 'long',
+                        entry_price=pos.entry_price if hasattr(pos, 'entry_price') else 0,
+                        exit_price=current_price,
+                        pnl=trade.pnl,
+                        rationale=reason,
+                        output_base="outputs",
+                    )
+                    logger.info(f"Feedback learning recorded: {ticker} {'WIN' if trade.pnl >= 0 else 'LOSS'} ${trade.pnl:+.2f}")
+                except Exception as learn_err:
+                    logger.warning(f"Feedback learning failed on close: {learn_err}")
+
     # Send notifications for closed positions
     if closed_positions:
         try:

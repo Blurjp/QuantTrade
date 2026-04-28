@@ -7,6 +7,7 @@ Never estimates. Never assumes fixed position sizes.
 import json
 import sys
 import urllib.request
+from pathlib import Path
 
 API_BASE = "https://scheduler-production-b60f.up.railway.app"
 
@@ -24,24 +25,70 @@ def get_status():
     positions = d.get("positions", {})
     trades = d.get("trades", [])
 
-    # ─── Positions (use REAL position_value, never estimate) ───
+    # ─── Positions (RECALCULATE from live prices, never trust stale data) ───
     total_pos_val = 0
     total_unrealized_pnl = 0
 
     if positions:
+        # Fetch live prices for all tickers
+        live_prices = {}
+        try:
+            import subprocess
+            tickers = list(positions.keys())
+            # Use venv python with yfinance installed
+            venv_python = str(Path(__file__).parent / ".venv" / "bin" / "python3")
+            script = f'''
+import yfinance as yf, json, sys
+try:
+    batch = yf.download({tickers!r}, period="1d", progress=False)
+    if batch.empty: sys.exit(0)
+    close = batch["Close"]
+    result = {{}}
+    for t in {tickers!r}:
+        if len({tickers!r}) == 1:
+            result[t] = float(close.iloc[-1])
+        elif t in close.columns:
+            s = close[t].dropna()
+            if len(s) > 0: result[t] = float(s.iloc[-1])
+    print(json.dumps(result))
+except: pass
+'''
+            result = subprocess.run([venv_python, "-c", script], capture_output=True, text=True, timeout=20)
+            if result.stdout.strip():
+                live_prices = json.loads(result.stdout.strip())
+        except Exception:
+            pass  # Fallback to stale data
+
         print("📊 Holdings:")
         for t, p in sorted(positions.items()):
-            pos_val = p.get("position_value", 0)
-            unrealized = p.get("unrealized_pnl", 0)
             entry = p.get("entry_price", 0)
+            qty = p.get("quantity", 0)
             direction = p.get("direction", "long").upper()
+
+            # Recalculate from live price if available
+            live_price = live_prices.get(t)
+            if live_price and qty:
+                if direction == "LONG":
+                    unrealized = qty * (live_price - entry)
+                    pos_val = qty * live_price
+                else:
+                    unrealized = qty * (entry - live_price)
+                    pos_val = p.get("position_value", 0) + unrealized
+                current_price = live_price
+            else:
+                # Fallback to stale data
+                unrealized = p.get("unrealized_pnl", 0)
+                pos_val = p.get("position_value", 0)
+                current_price = p.get("current_price", 0)
+
             total_pos_val += pos_val
             total_unrealized_pnl += unrealized
 
             emoji = "🟢" if unrealized >= 0 else "🔴"
             pnl_pct = (unrealized / pos_val * 100) if pos_val else 0
-            print(f"  {emoji} {direction:5} {t:6} val=${pos_val:>9,.2f}  "
-                  f"entry=${entry:.2f}  P&L=${unrealized:>+,.2f} ({pnl_pct:+.1f}%)")
+            stale_flag = " ⚠️stale" if not live_price else ""
+            print(f"  {emoji} {direction:5} {t:6} cur=${current_price:>8.2f}  "
+                  f"entry=${entry:.2f}  P&L=${unrealized:>+,.2f} ({pnl_pct:+.1f}%){stale_flag}")
 
     # ─── Summary ───
     total_value = cash + total_pos_val

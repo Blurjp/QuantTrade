@@ -144,12 +144,56 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"No summary for {date_str}"}, 404)
 
         elif self.path == "/api/portfolio":
-            # Serve current portfolio state
+            # Serve current portfolio state with REAL-TIME unrealized P&L
             portfolio_file = Path(OUTPUT_BASE) / "paper_trading" / "multi_asset_portfolio.json"
-            if portfolio_file.exists():
-                self._send_json(json.loads(portfolio_file.read_text()))
-            else:
+            if not portfolio_file.exists():
                 self._send_json({"error": "No portfolio file"}, 404)
+                return
+
+            data = json.loads(portfolio_file.read_text())
+            positions = data.get("positions", {})
+            if positions:
+                try:
+                    import yfinance as yf
+                    tickers = list(positions.keys())
+                    batch = yf.download(tickers, period="1d", progress=False)
+                    if not batch.empty:
+                        close = batch["Close"]
+                        for ticker, pos in positions.items():
+                            if len(tickers) == 1:
+                                price = float(close.iloc[-1])
+                            elif ticker in close.columns:
+                                series = close[ticker].dropna()
+                                if len(series) == 0:
+                                    continue
+                                price = float(series.iloc[-1])
+                            else:
+                                continue
+
+                            if price != price:  # NaN check
+                                continue
+
+                            entry = float(pos.get("entry_price", 0))
+                            qty = float(pos.get("quantity", 0))
+                            direction = pos.get("direction", "long")
+
+                            # Recalculate unrealized P&L from live price
+                            if direction == "long":
+                                unrealized = qty * (price - entry)
+                            else:
+                                unrealized = qty * (entry - price)
+
+                            # Update position with live data
+                            pos["current_price"] = round(price, 2)
+                            pos["unrealized_pnl"] = round(unrealized, 2)
+                            # Also update position_value to reflect current market value
+                            if direction == "long":
+                                pos["position_value"] = round(qty * price, 2)
+                except Exception as e:
+                    logger.warning(f"Live price refresh failed for /api/portfolio: {e}")
+                    # Serve stale data rather than fail
+
+            self._send_json(data)
 
         elif self.path == "/api/prices":
             # Fetch current prices for portfolio tickers via batch yfinance

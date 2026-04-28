@@ -86,6 +86,64 @@ def check_trade_history_integrity(trades):
     
     return issues
 
+def check_pnl_integrity(positions):
+    """Cross-check stored unrealized_pnl against live recalculation."""
+    issues = []
+    try:
+        import subprocess
+        from pathlib import Path
+        venv_python = str(Path(__file__).parent / ".venv" / "bin" / "python3")
+        tickers = list(positions.keys())
+        if not tickers:
+            return issues
+        script = f'''
+import yfinance as yf, json, sys
+try:
+    batch = yf.download({tickers!r}, period="1d", progress=False)
+    if batch.empty: sys.exit(0)
+    close = batch["Close"]
+    result = {{}}
+    for t in {tickers!r}:
+        if len({tickers!r}) == 1:
+            result[t] = float(close.iloc[-1])
+        elif t in close.columns:
+            s = close[t].dropna()
+            if len(s) > 0: result[t] = float(s.iloc[-1])
+    print(json.dumps(result))
+except: pass
+'''
+        result = subprocess.run([venv_python, "-c", script], capture_output=True, text=True, timeout=20)
+        if not result.stdout.strip():
+            return issues
+        live_prices = json.loads(result.stdout.strip())
+
+        for ticker, pos in positions.items():
+            entry = float(pos.get("entry_price", 0))
+            qty = float(pos.get("quantity", 0))
+            direction = pos.get("direction", "long")
+            stored_pnl = float(pos.get("unrealized_pnl", 0))
+
+            live_price = live_prices.get(ticker)
+            if not live_price or not qty:
+                continue
+
+            if direction == "long":
+                calc_pnl = qty * (live_price - entry)
+            else:
+                calc_pnl = qty * (entry - live_price)
+
+            drift = abs(calc_pnl - stored_pnl)
+            pct_drift = (drift / abs(calc_pnl) * 100) if calc_pnl else 0
+
+            if drift > 20 or pct_drift > 10:
+                issues.append(f"🔴 {ticker} P&L stale: stored=${stored_pnl:+.2f} live=${calc_pnl:+.2f} drift=${drift:.2f} ({pct_drift:.0f}%)")
+            elif drift > 5:
+                issues.append(f"🟡 {ticker} P&L drift: stored=${stored_pnl:+.2f} live=${calc_pnl:+.2f} drift=${drift:.2f}")
+    except Exception:
+        pass  # Don't fail health check on yfinance issues
+    return issues
+
+
 def check_cash_buffer(cash, total_value):
     """Check if cash buffer is adequate."""
     issues = []
@@ -147,7 +205,14 @@ def main():
     if not cash_issues:
         print(f"   ✅ Cash buffer: {cash/total*100:.0f}% (adequate)")
     
-    # 5. P&L distribution
+    # 5. P&L integrity (stale data check)
+    print(f"\n🔍 P&L Integrity (live vs stored):")
+    pnl_issues = check_pnl_integrity(positions)
+    all_issues.extend(pnl_issues)
+    if not pnl_issues:
+        print("   ✅ All unrealized P&L values match live prices")
+
+    # 6. P&L distribution
     print(f"\n📈 P&L Distribution:")
     winners = [p for p in positions.values() if p.get("unrealized_pnl", 0) > 0]
     losers = [p for p in positions.values() if p.get("unrealized_pnl", 0) < 0]

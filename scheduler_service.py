@@ -838,6 +838,19 @@ def run_daily_pipeline():
         prices.update({k: v for k, v in got_price.items()})
         trades_made = 0
 
+        # Initialize execution service (replaces direct portfolio.open_position calls)
+        # FAIL CLOSED: if ExecutionService cannot initialize, auto-trading is skipped.
+        # Phase 0 mandates no production bypass; degradation to direct open_position
+        # is the exact unsafe path Phase 0 removes.
+        try:
+            from execution.service import ExecutionService
+            execution_svc = ExecutionService()
+        except Exception as svc_err:
+            logger.error(
+                f"ExecutionService init failed — auto-trading DISABLED: {svc_err}"
+            )
+            execution_svc = None
+
         # Initialize risk manager
         try:
             from risk.risk_manager import RiskManager
@@ -870,91 +883,175 @@ def run_daily_pipeline():
         max_trades = 3
         
         if use_fusion:
-            # Bayesian + Kelly path
-            for decision in decisions:
-                if trades_made >= max_trades:
-                    break
-                
-                ticker = decision["ticker"]
-                direction = decision["direction"]
-                position_value = decision["position_value"]
-                
-                if ticker not in prices or not prices[ticker]:
-                    logger.info(f"  Skip {ticker}: no price")
-                    continue
-                
-                price = float(prices[ticker])
-                if price <= 0 or position_value < 500:
-                    continue
-                
-                # Risk management check
-                if risk_mgr:
-                    approved, reason = risk_mgr.check_risk(
-                        ticker=ticker, direction=direction,
-                        position_value=position_value, portfolio=portfolio,
-                    )
-                    if not approved:
-                        logger.info(f"Risk check blocked {ticker}: {reason}")
+            if not execution_svc:
+                logger.warning("Skipping Bayesian auto-trade: ExecutionService unavailable")
+            else:
+                for decision in decisions:
+                    if trades_made >= max_trades:
+                        break
+
+                    ticker = decision["ticker"]
+                    direction = decision["direction"]
+                    position_value = decision["position_value"]
+
+                    if ticker not in prices or not prices[ticker]:
+                        logger.info(f"  Skip {ticker}: no price")
                         continue
-                
-                # Build rationale from sources
-                source_desc = ", ".join(f"{s['type']}({s['confidence']:.0f}%)" for s in decision['sources'])
-                conflict_str = " [CONFLICT]" if decision['conflict'] else ""
-                
-                try:
-                    portfolio.open_position(
-                        ticker=ticker, direction=direction,
-                        price=price, value=position_value,
-                        rationale=f"Bayesian: {source_desc}{conflict_str}",
-                        asset_class=decision['sources'][0].get('type', 'commodity') if decision['sources'] else 'commodity',
-                    )
-                    if ticker in portfolio.positions:
-                        portfolio.positions[ticker].region_id = decision['sources'][0].get('region', '') if decision['sources'] else ''
-                    trades_made += 1
-                    logger.info(f"AUTO-TRADE [BAYES] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f} fused={decision['fused_confidence']:.0f}% kelly={decision['kelly_fraction']*100:.1f}%{conflict_str}")
-                    
-                    if signal_tracker:
-                        try:
-                            sig_for_track = {"region_id": decision['sources'][0].get('region',''), "direction": direction, "confidence": decision['fused_confidence'], "instruments": [ticker]}
-                            signal_tracker.record_position_opened(sig_for_track, ticker, price)
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.error(f"Failed to open {ticker}: {e}")
+
+                    price = float(prices[ticker])
+                    if price <= 0 or position_value < 500:
+                        continue
+
+                    # Risk management check
+                    if risk_mgr:
+                        approved, reason = risk_mgr.check_risk(
+                            ticker=ticker, direction=direction,
+                            position_value=position_value, portfolio=portfolio,
+                        )
+                        if not approved:
+                            logger.info(f"Risk check blocked {ticker}: {reason}")
+                            continue
+
+                    # Build rationale from sources
+                    source_desc = ", ".join(f"{s['type']}({s['confidence']:.0f}%)" for s in decision['sources'])
+                    conflict_str = " [CONFLICT]" if decision['conflict'] else ""
+
+                    try:
+                        from execution.models import (
+                            OrderIntent, OrderSide, OrderType,
+                            TimeInForce, PositionIntent,
+                        )
+                        from datetime import datetime as _dt, timezone as _tz
+
+                        side = OrderSide.BUY if direction == "long" else OrderSide.SELL
+                        broker_positions = {p.symbol: p for p in execution_svc.broker.get_positions()}
+                        has_long = (
+                            ticker in broker_positions
+                            and broker_positions[ticker].side == "long"
+                        )
+                        if side == OrderSide.SELL and has_long:
+                            pos_intent = PositionIntent.CLOSE_POSITION
+                        elif side == OrderSide.SELL:
+                            pos_intent = PositionIntent.OPEN_POSITION
+                        else:
+                            pos_intent = PositionIntent.OPEN_POSITION
+
+                        intent = OrderIntent(
+                            symbol=ticker,
+                            side=side,
+                            notional=position_value,
+                            order_type=OrderType.MARKET,
+                            time_in_force=TimeInForce.DAY,
+                            client_order_id=execution_svc.make_client_order_id(
+                                "bayes", ticker, direction,
+                                _dt.now(_tz.utc).strftime("%Y%m%d"),
+                            ),
+                            created_at=_dt.now(_tz.utc),
+                            position_intent=pos_intent,
+                            rationale=f"Bayesian: {source_desc}{conflict_str}",
+                            metadata={
+                                "price": price,
+                                "asset_class": decision['sources'][0].get('type', 'commodity') if decision['sources'] else 'commodity',
+                            },
+                        )
+                        result = execution_svc.submit(intent)
+
+                        if result.status.value in ("accepted", "filled"):
+                            portfolio.open_position(
+                                ticker=ticker, direction=direction,
+                                price=price, value=position_value,
+                                rationale=f"Bayesian: {source_desc}{conflict_str}",
+                                asset_class=decision['sources'][0].get('type', 'commodity') if decision['sources'] else 'commodity',
+                            )
+                            if ticker in portfolio.positions:
+                                portfolio.positions[ticker].region_id = decision['sources'][0].get('region', '') if decision['sources'] else ''
+                            trades_made += 1
+                            logger.info(f"AUTO-TRADE [BAYES] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f} fused={decision['fused_confidence']:.0f}% kelly={decision['kelly_fraction']*100:.1f}%{conflict_str} exec={result.status.value}")
+                        else:
+                            logger.info(f"AUTO-TRADE [BAYES] REJECTED {ticker}: {result.rejection_reason}")
+
+                        if trades_made > 0 and signal_tracker:
+                            try:
+                                sig_for_track = {"region_id": decision['sources'][0].get('region',''), "direction": direction, "confidence": decision['fused_confidence'], "instruments": [ticker]}
+                                signal_tracker.record_position_opened(sig_for_track, ticker, price)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.error(f"Failed to open {ticker}: {e}")
         else:
             # Fallback: simple sorted signals
-            for key, sig in sorted_signals:
-                if trades_made >= max_trades:
-                    break
-                direction = sig.get("trade_direction", sig.get("direction", "neutral"))
-                instruments = sig.get("instruments", [])
-                if not instruments:
-                    continue
-                ticker = None
-                for inst in instruments:
-                    if isinstance(inst, str) and inst in prices and prices[inst] and inst not in portfolio.positions:
-                        ticker = inst
+            if not execution_svc:
+                logger.warning("Skipping fallback auto-trade: ExecutionService unavailable")
+            else:
+                for key, sig in sorted_signals:
+                    if trades_made >= max_trades:
                         break
-                if not ticker:
-                    continue
-                price = float(prices[ticker])
-                if price <= 0:
-                    continue
-                position_value = portfolio.cash * 0.05
-                if position_value < 500:
-                    continue
-                if risk_mgr:
-                    approved, reason = risk_mgr.check_risk(ticker=ticker, direction=direction, position_value=position_value, portfolio=portfolio)
-                    if not approved:
+                    direction = sig.get("trade_direction", sig.get("direction", "neutral"))
+                    instruments = sig.get("instruments", [])
+                    if not instruments:
                         continue
-                try:
-                    portfolio.open_position(ticker=ticker, direction=direction, price=price, value=position_value, rationale=f"Auto-trade: {sig.get('rationale','')[:150]}", asset_class=sig.get("signal_type","commodity"))
-                    if ticker in portfolio.positions:
-                        portfolio.positions[ticker].region_id = sig.get("region_id", "")
-                    trades_made += 1
-                    logger.info(f"AUTO-TRADE [FALLBACK] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f}")
-                except Exception as e:
-                    logger.error(f"Failed to open {ticker}: {e}")
+                    ticker = None
+                    for inst in instruments:
+                        if isinstance(inst, str) and inst in prices and prices[inst] and inst not in portfolio.positions:
+                            ticker = inst
+                            break
+                    if not ticker:
+                        continue
+                    price = float(prices[ticker])
+                    if price <= 0:
+                        continue
+                    position_value = portfolio.cash * 0.05
+                    if position_value < 500:
+                        continue
+                    if risk_mgr:
+                        approved, reason = risk_mgr.check_risk(ticker=ticker, direction=direction, position_value=position_value, portfolio=portfolio)
+                        if not approved:
+                            continue
+                    try:
+                        from execution.models import (
+                            OrderIntent as _OI, OrderSide as _OS, OrderType as _OT,
+                            TimeInForce as _TIF, PositionIntent as _PI,
+                        )
+                        from datetime import datetime as _dt2, timezone as _tz2
+
+                        side = _OS.BUY if direction == "long" else _OS.SELL
+                        broker_positions = {p.symbol: p for p in execution_svc.broker.get_positions()}
+                        has_long = (
+                            ticker in broker_positions
+                            and broker_positions[ticker].side == "long"
+                        )
+                        if side == _OS.SELL and has_long:
+                            pos_intent = _PI.CLOSE_POSITION
+                        else:
+                            pos_intent = _PI.OPEN_POSITION
+
+                        intent = _OI(
+                            symbol=ticker,
+                            side=side,
+                            notional=position_value,
+                            order_type=_OT.MARKET,
+                            time_in_force=_TIF.DAY,
+                            client_order_id=execution_svc.make_client_order_id(
+                                "fb", ticker, direction,
+                                _dt2.now(_tz2.utc).strftime("%Y%m%d"),
+                            ),
+                            created_at=_dt2.now(_tz2.utc),
+                            position_intent=pos_intent,
+                            rationale=f"Auto-trade: {sig.get('rationale','')[:150]}",
+                            metadata={"price": price},
+                        )
+                        result = execution_svc.submit(intent)
+
+                        if result.status.value in ("accepted", "filled"):
+                            portfolio.open_position(ticker=ticker, direction=direction, price=price, value=position_value, rationale=f"Auto-trade: {sig.get('rationale','')[:150]}", asset_class=sig.get("signal_type","commodity"))
+                            if ticker in portfolio.positions:
+                                portfolio.positions[ticker].region_id = sig.get("region_id", "")
+                            trades_made += 1
+                            logger.info(f"AUTO-TRADE [FALLBACK] {direction.upper()}: {ticker} @ ${price:.2f} val=${position_value:.0f} exec={result.status.value}")
+                        else:
+                            logger.info(f"AUTO-TRADE [FALLBACK] REJECTED {ticker}: {result.rejection_reason}")
+                    except Exception as e:
+                        logger.error(f"Failed to open {ticker}: {e}")
 
         # Send notifications for any trades made (both Bayesian and fallback)
         if trades_made > 0:

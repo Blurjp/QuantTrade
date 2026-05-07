@@ -4,6 +4,7 @@ Vehicle detection for parking lots and auto inventory.
 Uses YOLOv8 for vehicle detection in optical satellite imagery.
 """
 
+import logging
 import numpy as np
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -11,6 +12,8 @@ import json
 from datetime import date
 import geopandas as gpd
 from shapely.geometry import Point, Polygon
+
+logger = logging.getLogger(__name__)
 
 
 class VehicleDetector:
@@ -138,12 +141,19 @@ def count_vehicles_in_parking_lots(
     Returns:
         Dictionary with vehicle counts per parking lot
     """
-    import rasterio
-    from rasterio.mask import mask as rasterio_mask
-    
     if detector is None:
         detector = VehicleDetector(use_yolo=False)
-    
+
+    try:
+        from data.loaders.manifest import load_stac_items
+        import planetary_computer
+        import rasterio
+        from rasterio.mask import mask as rasterio_mask
+        from shapely.geometry import mapping
+        _sat_deps = True
+    except ImportError:
+        _sat_deps = False
+
     # Load AOI
     aoi = gpd.read_file(aoi_path)
     
@@ -167,67 +177,60 @@ def count_vehicles_in_parking_lots(
             "note": "Sentinel-2 fetch failed",
         }
         
-        try:
-            from data.loaders.manifest import load_stac_items
-            import planetary_computer
-            import rasterio
-            from rasterio.mask import mask as rasterio_mask
-            from shapely.geometry import mapping
-            
-            items = load_stac_items(
-                lot_geom,
-                image_date,
-                collection="sentinel-2-l2a",
-                max_cloud_cover=30,
-            )
-            
-            if not items:
-                lot_result["note"] = "No Sentinel-2 scenes available"
-                results["lots"].append(lot_result)
-                results["total_vehicles"] += lot_result["vehicle_count"]
-                continue
-            
-            signed_item = planetary_computer.sign(items[0])
-            asset = signed_item.assets.get("visual") or signed_item.assets.get("B04")
-            
-            if not asset:
-                lot_result["note"] = "No visual/B04 asset in scene"
-                results["lots"].append(lot_result)
-                results["total_vehicles"] += lot_result["vehicle_count"]
-                continue
-            
-            with rasterio.open(asset.href) as src:
-                out_image, out_transform = rasterio_mask(
-                    src, [mapping(lot_geom)], crop=True
+        if not _sat_deps:
+            lot_result["note"] = "Missing satellite dependencies"
+        else:
+            try:
+                items = load_stac_items(
+                    lot_geom,
+                    image_date,
+                    collection="sentinel-2-l2a",
+                    max_cloud_cover=30,
                 )
-            
-            import numpy as np
-            image = np.transpose(out_image, (1, 2, 0))
-            
-            if image.shape[0] < 10 or image.shape[1] < 10:
-                lot_result["note"] = "Cropped image too small"
-                results["lots"].append(lot_result)
-                results["total_vehicles"] += lot_result["vehicle_count"]
-                continue
-            
-            detections = detector.detect(image)
-            
-            lot_result = {
-                "name": lot_name,
-                "polygon": lot_geom.bounds,
-                "vehicle_count": len(detections),
-                "confidence": "high" if detector.use_yolo else "medium",
-                "detections": detections,
-                "note": "success",
-            }
-        except ImportError as e:
-            lot_result["note"] = f"Missing dependency: {e}"
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Vehicle detection failed for lot %s: %s", lot_name, e
-            )
-            lot_result["note"] = str(e)
+
+                if not items:
+                    lot_result["note"] = "No Sentinel-2 scenes available"
+                    results["lots"].append(lot_result)
+                    results["total_vehicles"] += lot_result["vehicle_count"]
+                    continue
+
+                signed_item = planetary_computer.sign(items[0])
+                asset = signed_item.assets.get("visual") or signed_item.assets.get("B04")
+
+                if not asset:
+                    lot_result["note"] = "No visual/B04 asset in scene"
+                    results["lots"].append(lot_result)
+                    results["total_vehicles"] += lot_result["vehicle_count"]
+                    continue
+
+                with rasterio.open(asset.href) as src:
+                    out_image, out_transform = rasterio_mask(
+                        src, [mapping(lot_geom)], crop=True
+                    )
+
+                image = np.transpose(out_image, (1, 2, 0))
+
+                if image.shape[0] < 10 or image.shape[1] < 10:
+                    lot_result["note"] = "Cropped image too small"
+                    results["lots"].append(lot_result)
+                    results["total_vehicles"] += lot_result["vehicle_count"]
+                    continue
+
+                detections = detector.detect(image)
+
+                lot_result = {
+                    "name": lot_name,
+                    "polygon": lot_geom.bounds,
+                    "vehicle_count": len(detections),
+                    "confidence": "high" if detector.use_yolo else "medium",
+                    "detections": detections,
+                    "note": "success",
+                }
+            except Exception as e:
+                logger.warning(
+                    "Vehicle detection failed for lot %s: %s", lot_name, e
+                )
+                lot_result["note"] = str(e)
         
         results["lots"].append(lot_result)
         results["total_vehicles"] += lot_result["vehicle_count"]
@@ -248,12 +251,6 @@ def get_retail_baseline(ticker: str, lookback_weeks: int = 52) -> Dict:
     
     Uses historical satellite data or alternative data sources.
     """
-    import numpy as np
-    from pathlib import Path
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
     TICKER_REGION_MAP = {"WMT": "walmart_hq", "COST": "costco_hq", "TGT": "target_hq"}
     region_id = TICKER_REGION_MAP.get(ticker.upper())
     
@@ -262,10 +259,15 @@ def get_retail_baseline(ticker: str, lookback_weeks: int = 52) -> Dict:
     
     vehicle_counts = []
     output_base = Path("outputs")
-    
+    dirs_scanned = 0
+
     for date_dir in sorted(output_base.iterdir(), reverse=True):
         if not date_dir.is_dir() or not date_dir.name[0:4].isdigit():
             continue
+
+        dirs_scanned += 1
+        if dirs_scanned > MAX_DATE_DIRS_TO_SCAN:
+            break
         
         region_dir = date_dir / "parking" / region_id
         if not region_dir.exists():

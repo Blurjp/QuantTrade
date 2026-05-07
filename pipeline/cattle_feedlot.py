@@ -36,113 +36,59 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from pipeline.regions import get_regions_by_type
+
 logger = logging.getLogger(__name__)
 
 
-# Major US feedlot regions with coordinates (lat, lon, radius_km)
-FEEDLOT_REGIONS = {
-    "texas_panhandle": {
-        "name": "Texas Panhandle Feedlots",
-        "description": "Largest US feedlot concentration (Cactus, Hereford, Dalhart)",
-        "lat": 35.83,
-        "lon": -101.95,
-        "radius_km": 80,
-        "capacity_share": 0.30,  # ~30% of US feedlot capacity
-        "state": "TX",
-    },
-    "sw_kansas": {
-        "name": "Southwest Kansas Feedlots",
-        "description": "Major feedlot region (Dodge City, Garden City, Liberal)",
-        "lat": 37.75,
-        "lon": -100.44,
-        "radius_km": 70,
-        "capacity_share": 0.20,
-        "state": "KS",
-    },
-    "central_nebraska": {
-        "name": "Central Nebraska Feedlots",
-        "description": "Key cattle region (Lexington, Grand Island)",
-        "lat": 40.78,
-        "lon": -99.23,
-        "radius_km": 60,
-        "capacity_share": 0.15,
-        "state": "NE",
-    },
-    "ne_colorado": {
-        "name": "Northeast Colorado Feedlots",
-        "description": "Greeley-Sterling feedlot corridor",
-        "lat": 40.42,
-        "lon": -104.31,
-        "radius_km": 50,
-        "capacity_share": 0.10,
-        "state": "CO",
-    },
-    "central_iowa": {
-        "name": "Central Iowa Feedlots",
-        "description": "Iowa cattle finishing operations",
-        "lat": 41.59,
-        "lon": -93.62,
-        "radius_km": 50,
-        "capacity_share": 0.08,
-        "state": "IA",
-    },
-    "oklahoma_panhandle": {
-        "name": "Oklahoma Panhandle Feedlots",
-        "description": "Guymon-area feedlots",
-        "lat": 36.68,
-        "lon": -101.48,
-        "radius_km": 40,
-        "capacity_share": 0.07,
-        "state": "OK",
-    },
-    "idaho_snake_river": {
-        "name": "Idaho Snake River Basin",
-        "description": "Pacific Northwest feedlot operations",
-        "lat": 43.46,
-        "lon": -112.05,
-        "radius_km": 50,
-        "capacity_share": 0.05,
-        "state": "ID",
-    },
-    "central_california": {
-        "name": "Central Valley California",
-        "description": "California feedlot and dairy operations",
-        "lat": 36.24,
-        "lon": -119.81,
-        "radius_km": 60,
-        "capacity_share": 0.05,
-        "state": "CA",
-    },
-}
-
-# Pasture/grazing regions (for feed supply)
-PASTURE_REGIONS = {
-    "flint_hills": {
-        "name": "Flint Hills Kansas Grazing",
-        "lat": 38.35,
-        "lon": -96.55,
-        "radius_km": 80,
-    },
-    "sandhills_ne": {
-        "name": "Nebraska Sandhills",
-        "lat": 42.05,
-        "lon": -101.75,
-        "radius_km": 100,
-    },
-    "tx_hill_country": {
-        "name": "Texas Hill Country Pasture",
-        "lat": 30.30,
-        "lon": -98.87,
-        "radius_km": 60,
-    },
-}
-
-# Instruments for trading signals
 INSTRUMENTS = {
-    "beef_bullish": ["LE=F", "CORN", "SOYB"],   # Long cattle on supply tightness, feed costs rise
-    "beef_bearish": ["LE=F", "CORN", "SOYB"],    # Short cattle on oversupply, feed costs drop
-    "feed_proxy": ["CORN", "SOYB"],      # Corn/soy as feed cost
+    "beef_bullish": ["LE=F", "CORN", "SOYB"],
+    "beef_bearish": ["LE=F", "CORN", "SOYB"],
+    "feed_proxy": ["CORN", "SOYB"],
 }
+
+THERMAL_HIGH_THRESHOLD = 50
+THERMAL_MODERATE_THRESHOLD = 25
+NDVI_POOR_THRESHOLD = 0.3
+NDVI_FAIR_THRESHOLD = 0.45
+NDVI_GOOD_THRESHOLD = 0.65
+REGION_ANOMALY_DIRECTION_THRESHOLD = 30
+CONFIDENCE_MULTIPLIER = 25
+CONFIDENCE_BASE = 10
+MAX_CONFIDENCE = 100
+MIN_CONFIDENCE = 10
+
+
+def _load_feedlot_regions() -> Dict:
+    regions = get_regions_by_type("cattle_feedlot")
+    out = {}
+    for region_id, cfg in regions.items():
+        out[region_id] = {
+            "name": cfg.get("name", region_id),
+            "description": cfg.get("description", ""),
+            "lat": cfg.get("center", [0, 0])[1],
+            "lon": cfg.get("center", [0, 0])[0],
+            "radius_km": cfg.get("radius_km", 50),
+            "capacity_share": cfg.get("capacity_share", 0),
+            "state": cfg.get("state", ""),
+            "thermal_id": cfg.get("thermal_id"),
+            "veg_id": cfg.get("veg_id"),
+        }
+    return out
+
+
+def _load_pasture_regions() -> Dict:
+    regions = get_regions_by_type("pasture")
+    out = {}
+    for region_id, cfg in regions.items():
+        out[region_id] = {
+            "name": cfg.get("name", region_id),
+            "lat": cfg.get("center", [0, 0])[1],
+            "lon": cfg.get("center", [0, 0])[0],
+            "radius_km": cfg.get("radius_km", 50),
+            "veg_id": cfg.get("veg_id"),
+        }
+    return out
 
 
 class CattleFeedlotMonitor:
@@ -150,8 +96,8 @@ class CattleFeedlotMonitor:
 
     def __init__(self, output_base: str = "outputs"):
         self.output_base = Path(output_base)
-        self.regions = FEEDLOT_REGIONS
-        self.pasture_regions = PASTURE_REGIONS
+        self.regions = _load_feedlot_regions()
+        self.pasture_regions = _load_pasture_regions()
         self.logger = logging.getLogger(f"{__name__}.CattleFeedlotMonitor")
 
     def analyze_feedlot_thermal(self, region_id: str) -> Dict:
@@ -163,14 +109,7 @@ class CattleFeedlotMonitor:
         if not region:
             return {}
 
-        # Map cattle region_id to thermal facility IDs
-        thermal_map = {
-            "texas_panhandle": "feedlot_texas_panhandle",
-            "sw_kansas": "feedlot_sw_kansas",
-            "central_nebraska": "feedlot_central_nebraska",
-        }
-
-        thermal_id = thermal_map.get(region_id)
+        thermal_id = region.get("thermal_id")
         if thermal_id:
             thermal_file = self.output_base / "thermal_infrared" / f"signal_{thermal_id}_*.json"
             import glob
@@ -196,18 +135,10 @@ class CattleFeedlotMonitor:
         """
         Analyze pasture/grazing land health via NDVI from vegetation pipeline.
         """
-        # Map pasture region IDs to vegetation pipeline region IDs
-        pasture_to_veg = {
-            "flint_hills": "usa_flint_hills_pasture",
-            "sandhills_ne": "usa_sandhills_pasture",
-            "tx_hill_country": "usa_texas_panhandle_feedlot",
-        }
-
         results = {}
         for region_id, region in self.pasture_regions.items():
-            veg_id = pasture_to_veg.get(region_id)
+            veg_id = region.get("veg_id")
             if veg_id:
-                # Try loading latest vegetation signal
                 import glob
                 veg_files = sorted(glob.glob(str(self.output_base / "vegetation" / f"*{veg_id}*")))
                 if veg_files:
@@ -262,20 +193,19 @@ class CattleFeedlotMonitor:
         # Low thermal + high pasture NDVI = bearish (abundant supply)
 
         supply_score = 0
-        if avg_thermal > 50:
-            supply_score -= 2  # High activity → cattle being moved/sold
-        elif avg_thermal > 25:
+        if avg_thermal > THERMAL_HIGH_THRESHOLD:
+            supply_score -= 2
+        elif avg_thermal > THERMAL_MODERATE_THRESHOLD:
             supply_score -= 1
 
-        if avg_pasture_ndvi < 0.3:
-            supply_score -= 2  # Poor pasture → supply pressure
-        elif avg_pasture_ndvi < 0.45:
+        if avg_pasture_ndvi < NDVI_POOR_THRESHOLD:
+            supply_score -= 2
+        elif avg_pasture_ndvi < NDVI_FAIR_THRESHOLD:
             supply_score -= 1
-        elif avg_pasture_ndvi > 0.65:
-            supply_score += 1  # Good pasture → healthy supply
+        elif avg_pasture_ndvi > NDVI_GOOD_THRESHOLD:
+            supply_score += 1
 
-        # Generate confidence
-        confidence = min(100, max(10, int(abs(supply_score) * 25 + 10)))
+        confidence = min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, int(abs(supply_score) * CONFIDENCE_MULTIPLIER + CONFIDENCE_BASE)))
 
         direction = "neutral"
         instruments = INSTRUMENTS["beef_bullish"]
@@ -304,7 +234,7 @@ class CattleFeedlotMonitor:
                 f"Cattle market neutral. Feedlot thermal: {avg_thermal:.1f}%, "
                 f"Pasture NDVI: {avg_pasture_ndvi:.3f}. No strong directional signal."
             )
-            confidence = max(10, confidence // 2)
+            confidence = max(MIN_CONFIDENCE, confidence // 2)
 
         # Per-region signals
         for region_id, result in thermal_results.items():
@@ -312,8 +242,8 @@ class CattleFeedlotMonitor:
             anomaly = result.get("thermal_anomaly", 0)
             source = result.get("source", "unknown")
 
-            region_confidence = min(100, max(10, int(abs(anomaly) * 1.5 + 10)))
-            region_direction = "long" if anomaly > 30 else "short" if anomaly < -30 else "neutral"
+            region_confidence = min(MAX_CONFIDENCE, max(MIN_CONFIDENCE, int(abs(anomaly) * 1.5 + CONFIDENCE_BASE)))
+            region_direction = "long" if anomaly > REGION_ANOMALY_DIRECTION_THRESHOLD else "short" if anomaly < -REGION_ANOMALY_DIRECTION_THRESHOLD else "neutral"
 
             if region_direction == "neutral":
                 region_confidence = max(10, region_confidence // 2)

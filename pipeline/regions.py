@@ -91,6 +91,15 @@ def get_active_regions(registry_path: Optional[Union[str, Path]] = None) -> Dict
     }
 
 
+def get_regions_by_type(region_type: str, registry_path: Optional[Union[str, Path]] = None) -> Dict:
+    regions = load_region_registry(registry_path)
+    return {
+        region_id: config
+        for region_id, config in regions.items()
+        if config.get("type") == region_type
+    }
+
+
 def resolve_region_output_base(output_base: str = "outputs", region_id: str = "hormuz") -> str:
     base = Path(output_base)
     region_base = base / "regions" / region_id
@@ -105,6 +114,7 @@ def resolve_region_output_base(output_base: str = "outputs", region_id: str = "h
 __all__ = [
     "get_active_regions",
     "get_region_config",
+    "get_regions_by_type",
     "list_regions",
     "load_region_registry",
     "load_registry",

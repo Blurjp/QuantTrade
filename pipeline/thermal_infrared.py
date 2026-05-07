@@ -24,6 +24,26 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def _load_cattle_feedlot_facilities() -> Dict:
+    from pipeline.regions import get_regions_by_type
+    out = {}
+    for region_id, cfg in get_regions_by_type("cattle_feedlot").items():
+        thermal_id = cfg.get("thermal_id")
+        if not thermal_id:
+            continue
+        out[thermal_id] = {
+            "name": cfg.get("name", region_id),
+            "location": cfg.get("description", ""),
+            "type": "cattle_feedlot",
+            "bbox": cfg.get("bbox"),
+            "instruments": cfg.get("instruments", ["LE=F", "CORN"]),
+            "description": cfg.get("description", ""),
+            "normal_temp_range": cfg.get("normal_temp_range", [15, 45]),
+            "activity_threshold": cfg.get("activity_threshold", 25),
+        }
+    return out
+
+
 class ThermalInfraredMonitor:
     """Monitor industrial activity using thermal infrared satellite imagery."""
     
@@ -153,40 +173,11 @@ class ThermalInfraredMonitor:
                 "normal_temp_range": [25, 50],
                 "activity_threshold": 35
             },
-            # Cattle Feedlot Facilities (thermal monitoring)
-            "feedlot_texas_panhandle": {
-                "name": "Texas Panhandle Feedlot Complex",
-                "location": "Cactus-Hereford-Dalhart, TX",
-                "type": "cattle_feedlot",
-                "bbox": [-102.8, 35.1, -101.1, 36.6],
-                "instruments": ["LE=F", "CORN", "SOYB"],
-                "description": "Largest US feedlot concentration (30% of US capacity)",
-                "normal_temp_range": [20, 45],
-                "activity_threshold": 30
-            },
-            "feedlot_sw_kansas": {
-                "name": "SW Kansas Feedlot Complex",
-                "location": "Dodge City-Garden City, KS",
-                "type": "cattle_feedlot",
-                "bbox": [-101.1, 37.1, -99.8, 38.4],
-                "instruments": ["LE=F", "CORN", "SOYB"],
-                "description": "Major Kansas feedlot region (20% of US capacity)",
-                "normal_temp_range": [18, 42],
-                "activity_threshold": 28
-            },
-            "feedlot_central_nebraska": {
-                "name": "Central Nebraska Feedlot Complex",
-                "location": "Lexington-Grand Island, NE",
-                "type": "cattle_feedlot",
-                "bbox": [-100.2, 40.3, -98.3, 41.3],
-                "instruments": ["LE=F", "CORN", "SOYB"],
-                "description": "Nebraska feedlot corridor (15% of US capacity)",
-                "normal_temp_range": [15, 40],
-                "activity_threshold": 25
-            },
         }
-        
-        # Create output directory
+
+        for region_id, cfg in _load_cattle_feedlot_facilities().items():
+            self.facilities[region_id] = cfg
+
         self.output_dir = self.output_base / "thermal_infrared"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     

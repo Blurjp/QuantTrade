@@ -33,6 +33,40 @@ def _confidence_label(score: float) -> str:
     return "Low"
 
 
+def _load_cattle_vegetation_regions() -> Dict:
+    from pipeline.regions import get_regions_by_type
+    out = {}
+    for region_id, cfg in get_regions_by_type("cattle_feedlot").items():
+        veg_id = cfg.get("veg_id")
+        if veg_id:
+            out[veg_id] = {
+                "name": cfg.get("name", region_id),
+                "bbox": cfg.get("bbox"),
+                "country": cfg.get("country", "USA"),
+                "type": "pasture",
+                "instruments": cfg.get("instruments", ["LE=F", "CORN"]),
+                "description": cfg.get("description", ""),
+                "baseline_ndvi": cfg.get("baseline_ndvi", 0.4),
+                "critical_months": cfg.get("critical_months", [4, 5, 6, 7, 8, 9]),
+                "crops": cfg.get("crops", ["pasture"]),
+            }
+    for region_id, cfg in get_regions_by_type("pasture").items():
+        veg_id = cfg.get("veg_id")
+        if veg_id:
+            out[veg_id] = {
+                "name": cfg.get("name", region_id),
+                "bbox": cfg.get("bbox"),
+                "country": cfg.get("country", "USA"),
+                "type": "pasture",
+                "instruments": cfg.get("instruments", ["LE=F", "CORN"]),
+                "description": cfg.get("description", ""),
+                "baseline_ndvi": cfg.get("baseline_ndvi", 0.4),
+                "critical_months": cfg.get("critical_months", [4, 5, 6, 7, 8, 9]),
+                "crops": cfg.get("crops", ["pasture"]),
+            }
+    return out
+
+
 def _representative_sample_bbox(bbox: List[float], half_span_deg: float = 0.4) -> List[float]:
     min_lon, min_lat, max_lon, max_lat = bbox
     center_lon = (min_lon + max_lon) / 2.0
@@ -87,72 +121,6 @@ class VegetationHealthMonitor:
                 "baseline_ndvi": 0.45,
                 "critical_months": [4, 5, 6, 7],
                 "crops": ["winter_wheat", "spring_wheat"]
-            },
-            "usa_texas_panhandle_feedlot": {
-                "name": "Texas Panhandle Feedlot & Grazing",
-                "bbox": [-102.8, 35.1, -101.1, 36.6],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Largest US feedlot concentration, pasture & feed monitoring",
-                "baseline_ndvi": 0.4,
-                "critical_months": [3, 4, 5, 6, 7, 8, 9, 10],
-                "crops": ['pasture', 'sorghum']
-            },
-            "usa_sw_kansas_feedlot": {
-                "name": "SW Kansas Feedlot & Grazing",
-                "bbox": [-101.1, 37.1, -99.8, 38.4],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Dodge City, Garden City feedlot region",
-                "baseline_ndvi": 0.42,
-                "critical_months": [4, 5, 6, 7, 8, 9],
-                "crops": ['pasture', 'wheat']
-            },
-            "usa_central_nebraska_feedlot": {
-                "name": "Central Nebraska Feedlot & Grazing",
-                "bbox": [-100.2, 40.3, -98.3, 41.3],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Nebraska Sandhills feedlot corridor",
-                "baseline_ndvi": 0.45,
-                "critical_months": [5, 6, 7, 8, 9],
-                "crops": ['pasture', 'corn']
-            },
-            "usa_ne_colorado_feedlot": {
-                "name": "NE Colorado Feedlot & Grazing",
-                "bbox": [-105.0, 40.0, -103.6, 40.9],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Greeley-Sterling feedlot corridor",
-                "baseline_ndvi": 0.38,
-                "critical_months": [4, 5, 6, 7, 8, 9],
-                "crops": ['pasture', 'corn']
-            },
-            "usa_flint_hills_pasture": {
-                "name": "Flint Hills Kansas Grazing",
-                "bbox": [-97.5, 37.6, -95.8, 39.1],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Major Kansas grazing land, leading cattle pasture indicator",
-                "baseline_ndvi": 0.5,
-                "critical_months": [4, 5, 6, 7, 8, 9, 10],
-                "crops": ['pasture', 'tallgrass']
-            },
-            "usa_sandhills_pasture": {
-                "name": "Nebraska Sandhills Grazing",
-                "bbox": [-103.5, 41.2, -100.0, 42.9],
-                "country": "USA",
-                "type": "pasture",
-                "instruments": ['COW', 'CORN'],
-                "description": "Largest sand dune grassland in Western Hemisphere, key cattle grazing",
-                "baseline_ndvi": 0.43,
-                "critical_months": [5, 6, 7, 8, 9],
-                "crops": ['pasture', 'mixed_grass']
             },
             
             # South America
@@ -251,8 +219,10 @@ class VegetationHealthMonitor:
                 "products": ["palm_oil", "palm_kernel"]
             },
         }
-        
-        # Create output directory
+
+        for veg_id, entry in _load_cattle_vegetation_regions().items():
+            self.regions[veg_id] = entry
+
         self.output_dir = self.output_base / "vegetation_health"
         self.output_dir.mkdir(parents=True, exist_ok=True)
     

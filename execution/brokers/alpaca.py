@@ -149,9 +149,19 @@ class AlpacaBrokerClient:
                 common_kwargs["stop_loss"] = sl_kwargs
 
         try:
-            if intent.order_type == OrderType.LIMIT and intent.limit_price is not None:
+            if intent.order_type == OrderType.LIMIT:
+                if intent.limit_price is None:
+                    return OrderResult(
+                        client_order_id=intent.client_order_id,
+                        status=OrderStatus.REJECTED,
+                        rejection_reason="limit_order_requires_limit_price",
+                    )
                 common_kwargs["limit_price"] = str(intent.limit_price)
                 order_req = LimitOrderRequest(**common_kwargs)
+            elif intent.order_type == OrderType.STOP:
+                return self._submit_stop_order(intent, common_kwargs, AlpacaSide, AlpacaTIF)
+            elif intent.order_type == OrderType.STOP_LIMIT:
+                return self._submit_stop_limit_order(intent, common_kwargs)
             else:
                 order_req = MarketOrderRequest(**common_kwargs)
 
@@ -165,6 +175,47 @@ class AlpacaBrokerClient:
                 client_order_id=intent.client_order_id,
                 status=OrderStatus.REJECTED,
                 rejection_reason=f"alpaca_error: {error_msg[:200]}",
+            )
+
+    def _submit_stop_order(self, intent, common_kwargs, AlpacaSide, AlpacaTIF):
+        if intent.stop_price is None:
+            return OrderResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                rejection_reason="stop_order_requires_stop_price",
+            )
+        try:
+            from alpaca.trading.requests import StopOrderRequest
+            common_kwargs["stop_price"] = str(intent.stop_price)
+            order_req = StopOrderRequest(**common_kwargs)
+            resp = self._client.submit_order(order_data=order_req)
+            return self._alpaca_order_to_result(resp)
+        except Exception as e:
+            return OrderResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                rejection_reason=f"alpaca_error: {str(e)[:200]}",
+            )
+
+    def _submit_stop_limit_order(self, intent, common_kwargs):
+        if intent.stop_price is None or intent.limit_price is None:
+            return OrderResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                rejection_reason="stop_limit_order_requires_stop_and_limit_price",
+            )
+        try:
+            from alpaca.trading.requests import LimitOrderRequest
+            common_kwargs["stop_price"] = str(intent.stop_price)
+            common_kwargs["limit_price"] = str(intent.limit_price)
+            order_req = LimitOrderRequest(**common_kwargs)
+            resp = self._client.submit_order(order_data=order_req)
+            return self._alpaca_order_to_result(resp)
+        except Exception as e:
+            return OrderResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                rejection_reason=f"alpaca_error: {str(e)[:200]}",
             )
 
     def cancel_order(self, broker_order_id: str) -> OrderResult:
@@ -246,6 +297,13 @@ class AlpacaBrokerClient:
             )
             fills = []
             for a in activities:
+                raw_ts = getattr(a, "timestamp", None) or getattr(a, "transaction_time", None)
+                fill_ts = datetime.now(timezone.utc)
+                if raw_ts:
+                    try:
+                        fill_ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                    except (ValueError, AttributeError):
+                        pass
                 fills.append(FillEvent(
                     broker_order_id=getattr(a, "order_id", ""),
                     fill_id=getattr(a, "id", ""),
@@ -253,7 +311,7 @@ class AlpacaBrokerClient:
                     side=OrderSide.BUY if getattr(a, "side", "") == "buy" else OrderSide.SELL,
                     quantity=float(getattr(a, "qty", 0)),
                     price=float(getattr(a, "price", 0)),
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=fill_ts,
                 ))
             return fills
         except Exception as e:

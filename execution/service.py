@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 
 class ExecutionService:
+    _account_cache_ttl_seconds = 60
+
     def __init__(
         self,
         ledger_path: str = "outputs/execution/orders.sqlite",
@@ -61,6 +63,7 @@ class ExecutionService:
             halt_trading_path or os.getenv("HALT_TRADING_PATH", "HALT_TRADING")
         )
         self.ledger = OrderLedger(db_path=ledger_path)
+        self._account_cache: Optional[tuple] = None
 
         if self.execution_mode == "live":
             broker_name = os.getenv("BROKER", "")
@@ -106,9 +109,9 @@ class ExecutionService:
                 rejection_reason=risk.reason,
             )
 
-        self.ledger.update_submitted_at(intent.client_order_id)
-
         result = self.broker.submit_order(intent)
+
+        self.ledger.update_submitted_at(intent.client_order_id)
 
         self.ledger.update_order_status(
             intent.client_order_id,
@@ -229,9 +232,14 @@ class ExecutionService:
                 )
 
         max_position_pct = float(os.getenv("MAX_POSITION_PCT", "0.10"))
-        account = self.broker.get_account()
+        account = self._get_cached_account()
         if account and account.equity > 0:
-            for pos in self.broker.get_positions():
+            try:
+                positions = self.broker.get_positions()
+            except Exception as e:
+                logger.warning("Failed to fetch positions for concentration check: %s", e)
+                positions = []
+            for pos in positions:
                 if pos.symbol == intent.symbol:
                     concentration = pos.market_value / account.equity
                     if concentration >= max_position_pct:
@@ -246,6 +254,26 @@ class ExecutionService:
                         )
 
         return RiskDecision(approved=True, reason="all_checks_passed")
+
+    def _get_cached_account(self):
+        if not hasattr(self, "_account_cache"):
+            self._account_cache = None
+        now = datetime.now(timezone.utc)
+        if self._account_cache is not None:
+            cached_account, cached_at = self._account_cache
+            age = (now - cached_at).total_seconds()
+            if age < self._account_cache_ttl_seconds:
+                return cached_account
+        try:
+            account = self.broker.get_account()
+            if account is not None:
+                self._account_cache = (account, now)
+            return account
+        except Exception as e:
+            logger.warning("Failed to fetch account: %s", e)
+            if self._account_cache is not None:
+                return self._account_cache[0]
+            return None
 
     @staticmethod
     def make_client_order_id(

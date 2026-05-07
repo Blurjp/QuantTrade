@@ -338,3 +338,47 @@ class TestAlpacaInit:
                 client = AlpacaBrokerClient()
                 _, kwargs = MockTC.call_args
                 assert kwargs["paper"] is False
+
+
+class TestAlpacaLimitOrderGuard:
+    def test_limit_order_without_price_rejected(self, alpaca_client):
+        intent = _intent(quantity=10.0)
+        intent.order_type = OrderType.LIMIT
+        intent.limit_price = None
+        result = alpaca_client.submit_order(intent)
+
+        assert result.status == OrderStatus.REJECTED
+        assert result.rejection_reason == "limit_order_requires_limit_price"
+
+    def test_limit_order_with_price_succeeds(self, alpaca_client):
+        alpaca_client._client.submit_order.return_value = _mock_alpaca_order(
+            status="new", filled_qty="0", filled_avg_price=None,
+        )
+        intent = _intent(quantity=10.0)
+        intent.order_type = OrderType.LIMIT
+        intent.limit_price = 48.50
+        result = alpaca_client.submit_order(intent)
+
+        assert result.status == OrderStatus.ACCEPTED
+        alpaca_client._client.submit_order.assert_called_once()
+
+
+class TestAlpacaStopOrders:
+    def test_stop_order_without_stop_price_rejected(self, alpaca_client):
+        intent = _intent(quantity=10.0)
+        intent.order_type = OrderType.STOP
+        intent.stop_price = None
+        result = alpaca_client.submit_order(intent)
+
+        assert result.status == OrderStatus.REJECTED
+        assert result.rejection_reason == "stop_order_requires_stop_price"
+
+    def test_stop_limit_without_prices_rejected(self, alpaca_client):
+        intent = _intent(quantity=10.0)
+        intent.order_type = OrderType.STOP_LIMIT
+        intent.stop_price = None
+        intent.limit_price = None
+        result = alpaca_client.submit_order(intent)
+
+        assert result.status == OrderStatus.REJECTED
+        assert "stop_limit_order_requires" in result.rejection_reason

@@ -14,7 +14,7 @@ Covers:
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -618,3 +618,97 @@ class TestSchedulerNoDirectOpenPosition:
             "Phase 0 requires fail-closed: if ExecutionService is unavailable, "
             "auto-trading must be skipped entirely."
         )
+
+
+class TestSubmittedAtOrdering:
+    def test_submitted_at_set_after_broker_success(self, service):
+        intent = _intent(coid="submitted-at-001", price=50.0)
+        service.submit(intent)
+
+        order = service.ledger.get_order("submitted-at-001")
+        assert order["submitted_at"] is not None
+        assert order["status"] == "filled"
+
+    def test_submitted_at_not_set_when_risk_rejected(self, service):
+        intent = _intent(
+            coid="submitted-at-rej-001",
+            price=50.0,
+            created_at=datetime.now(timezone.utc) - timedelta(hours=5),
+        )
+        result = service.submit(intent)
+
+        assert result.status == OrderStatus.REJECTED
+        assert result.rejection_reason == "order_expired"
+
+        order = service.ledger.get_order("submitted-at-rej-001")
+        assert order["submitted_at"] is None
+
+    def test_submitted_at_preserved_on_broker_propagated_error(self, tmp_path):
+        db = tmp_path / "test_submitted.sqlite"
+        halt = tmp_path / "HALT_TRADING"
+        svc = ExecutionService(
+            ledger_path=str(db),
+            halt_trading_path=str(halt),
+        )
+
+        svc.broker.submit_order = MagicMock(
+            side_effect=Exception("unexpected crash")
+        )
+
+        intent = _intent(coid="submitted-at-crash-001", price=50.0)
+        with pytest.raises(Exception, match="unexpected crash"):
+            svc.submit(intent)
+
+        order = svc.ledger.get_order("submitted-at-crash-001")
+        assert order["submitted_at"] is None
+        assert order["status"] == "pending"
+
+
+class TestAccountCache:
+    def test_account_cached_within_ttl(self, service):
+        call_count = 0
+        original_get_account = service.broker.get_account
+
+        def counting_get_account():
+            nonlocal call_count
+            call_count += 1
+            return original_get_account()
+
+        service.broker.get_account = counting_get_account
+        service._account_cache_ttl_seconds = 60
+
+        intent1 = _intent(coid="cache-001", symbol="XLE", price=50.0)
+        intent2 = _intent(coid="cache-002", symbol="SOYB", price=30.0)
+        service.submit(intent1)
+        service.submit(intent2)
+
+        assert call_count <= 2
+
+    def test_account_cache_stale_after_ttl(self, service):
+        service._account_cache_ttl_seconds = 0
+
+        intent1 = _intent(coid="cache-ttl-001", symbol="XLE", price=50.0)
+        intent2 = _intent(coid="cache-ttl-002", symbol="SOYB", price=30.0)
+        service.submit(intent1)
+        service.submit(intent2)
+
+    def test_account_cache_falls_back_on_error(self, service):
+        good_account = service.broker.get_account()
+        call_count = 0
+
+        def flaky_get_account():
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise Exception("API down")
+            return good_account
+
+        service.broker.get_account = flaky_get_account
+        service._account_cache_ttl_seconds = 0
+
+        intent1 = _intent(coid="cache-fb-001", symbol="XLE", price=50.0)
+        service.submit(intent1)
+
+        intent2 = _intent(coid="cache-fb-002", symbol="SOYB", price=30.0)
+        result = service.submit(intent2)
+        assert result.status == OrderStatus.FILLED

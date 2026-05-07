@@ -1,0 +1,57 @@
+###############################################################################
+# QuantTrade Cron Job Configuration Example
+#
+# This file shows how to set up automated trading signal generation.
+#
+# SETUP INSTRUCTIONS:
+# 1. Edit your crontab: crontab -e
+# 2. Add one of the examples below
+# 3. Save and exit
+#
+# To edit crontab: crontab -e
+# To list crontab: crontab -l
+# To remove crontab: crontab -r
+###############################################################################
+
+# Example 1: Run every 30 minutes (high-frequency monitoring)
+# */30 * * * * cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 2: Run daily at 8:00 AM (before market open)
+# 0 8 * * * cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 3: Run daily at 6:30 AM (early morning, more time for analysis)
+# 30 6 * * * cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 4: Run Monday-Friday at 7:00 AM (trading days only)
+# 0 7 * * 1-5 cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 5: Run multiple times per day (9:00 AM and 3:00 PM)
+# 0 9,15 * * * cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 6: Run every hour during trading hours (9 AM - 4 PM, weekdays)
+# 0 9-16 * * 1-5 cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 7: With email notification on failure
+# MAILTO=your-email@example.com
+# 0 8 * * * cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+# Example 8: Run with environment variables
+# 0 8 * * * export PYTHONPATH=/Users/jianping/projects/QuantTrade && cd /Users/jianping/projects/QuantTrade && ./scripts/run_daily_automated.sh
+
+###############################################################################
+# CRON FORMAT REFERENCE:
+#
+# * * * * * command
+# │ │ │ │ │
+# │ │ │ │ └─── Day of week (0-7, 0 or 7 = Sunday)
+# │ │ │ └───── Month (1-12)
+# │ │ └─────── Day of month (1-31)
+# │ └───────── Hour (0-23)
+# └─────────── Minute (0-59)
+#
+# Examples:
+# 0 8 * * *     - Daily at 8:00 AM
+# 30 6 * * 1-5  - Weekdays at 6:30 AM
+# 0 */4 * * *   - Every 4 hours
+# 0 8 * * 1     - Every Monday at 8:00 AM
+###############################################################################

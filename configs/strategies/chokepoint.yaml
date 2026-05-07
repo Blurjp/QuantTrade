@@ -1,0 +1,38 @@
+# Chokepoint Strategy Configuration
+
+# Signal thresholds
+signal_thresholds:
+  long_threshold: 1.5       # High throughput = bullish
+  short_threshold: -1.5     # Low throughput = bearish
+  min_quality_score: 0.4
+  min_sample_count: 5
+
+# Trade mapping
+trade_mapping:
+  direction: "direct"       # High throughput = bullish (buy shippers)
+  tickers:
+    - DRYS  # DryShips
+    - SBLK  # Star Bulk
+    - TNK   # Teekay Tankers
+    - NAT   # Nordic American Tankers
+
+position_sizing:
+  base_size_pct: 0.02
+  max_size_pct: 0.05
+  scale_by_confidence: true
+
+risk:
+  stop_loss_pct: 0.06
+  take_profit_pct: 0.12
+  horizon_days: 14
+
+portfolio:
+  max_total_exposure: 0.20
+
+features:
+  use_seasonal_adjustment: true
+  normalization_method: "zscore"
+
+meta_group: chokepoint
+meta_weight: 1.0
+confirmations_required: 1

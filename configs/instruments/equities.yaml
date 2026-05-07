@@ -1,0 +1,83 @@
+# Equity Instruments
+
+# Automotive
+automotive:
+  ticker: CARZ
+  name: First Trust NASDAQ Auto ETF
+  asset_type: etf
+  exchange: NASDAQ
+  description: Automotive sector exposure
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+ford:
+  ticker: F
+  name: Ford Motor Company
+  asset_type: equity
+  exchange: NYSE
+  description: Ford
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+gm:
+  ticker: GM
+  name: General Motors
+  asset_type: equity
+  exchange: NYSE
+  description: General Motors
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+stellantis:
+  ticker: STLA
+  name: Stellantis NV
+  asset_type: equity
+  exchange: NYSE
+  description: Stellantis (formerly FCA)
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+toyota:
+  ticker: TM
+  name: Toyota Motor
+  asset_type: equity
+  exchange: NYSE
+  description: Toyota
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+# Energy Companies
+exxon_mobil:
+  ticker: XOM
+  name: Exxon Mobil
+  asset_type: equity
+  exchange: NYSE
+  description: Exxon Mobil
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+chevron:
+  ticker: CVX
+  name: Chevron
+  asset_type: equity
+  exchange: NYSE
+  description: Chevron
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+slb:
+  ticker: SLB
+  name: Schlumberger
+  asset_type: equity
+  exchange: NYSE
+  description: Oil services
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true

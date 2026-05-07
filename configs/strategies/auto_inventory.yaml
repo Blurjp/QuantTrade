@@ -1,0 +1,46 @@
+# Auto Inventory Strategy Configuration
+
+# Signal generation thresholds
+signal_thresholds:
+  long_threshold: -1.5      # z-score below this = bullish
+  short_threshold: 1.5     # z-score above this = bearish
+  min_quality_score: 0.5    # Minimum data quality to generate signal
+  min_sample_count: 3       # Minimum observations required
+
+# Trade mapping
+trade_mapping:
+  direction: "inverse"      # High inventory = bearish (short auto stocks)
+  tickers:
+    - CARZ  # Automotive ETF
+    - F     # Ford
+    - GM    # General Motors
+    - STLA  # Stellantis
+
+# Position sizing
+position_sizing:
+  base_size_pct: 0.02       # 2% of portfolio per signal
+  max_size_pct: 0.05        # Maximum 5% per position
+  scale_by_confidence: true  # Scale position by signal confidence
+  scale_by_strength: true    # Scale position by signal strength
+
+# Risk parameters
+risk:
+  stop_loss_pct: 0.08       # 8% stop loss
+  take_profit_pct: 0.15     # 15% take profit
+  horizon_days: 30          # Target holding period
+
+# Portfolio constraints
+portfolio:
+  max_total_exposure: 0.25   # Max 25% in auto inventory positions
+  max_same_ticker: 0.10     # Max 10% in single ticker
+
+# Feature configuration
+features:
+  use_seasonal_adjustment: false
+  use_cross_region_normalization: true
+  normalization_method: "zscore"
+
+# Meta signal (aggregating multiple regions)
+meta_group: auto_inventory
+meta_weight: 1.0
+confirmations_required: 1

@@ -1,0 +1,68 @@
+# Commodity Trading Instruments
+
+# Soybeans
+soybeans:
+  ticker: SOYB
+  name: Teucrium Soybean ETF
+  asset_type: etf
+  exchange: NYSE
+  description: Soybeans price exposure
+  data_source: yahoo
+
+# Agriculture
+agriculture:
+  ticker: DBA
+  name: Invesco DB Agriculture ETF
+  asset_type: etf
+  exchange: NYSE
+  description: Broad agriculture exposure
+  data_source: yahoo
+
+# Grains
+grains:
+  ticker: JJG
+  name: iPath Grains ETF
+  asset_type: etf
+  exchange: NYSE
+  description: Grains exposure (wheat, corn, soy)
+  data_source: yahoo
+
+# Energy
+energy:
+  ticker: XLE
+  name: Energy Select Sector SPDR
+  asset_type: etf
+  exchange: NYSE
+  description: Energy sector exposure
+  data_source: yahoo
+
+crude_oil:
+  ticker: USO
+  name: United States Oil Fund
+  asset_type: etf
+  exchange: NYSE
+  description: WTI crude oil exposure
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+natural_gas:
+  ticker: UNG
+  name: United States Natural Gas Fund
+  asset_type: etf
+  exchange: NYSE
+  description: Natural gas exposure
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true
+
+# Shipping
+shipping:
+  ticker: DRYS
+  name: DryShips
+  asset_type: equity
+  exchange: NYSE
+  description: Shipping companies
+  data_source: yahoo
+  enabled_for_backtest: true
+  enabled_for_trading: true

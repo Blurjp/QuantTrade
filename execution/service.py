@@ -212,6 +212,22 @@ class ExecutionService:
                     },
                 )
 
+        if self.execution_mode == "live":
+            try:
+                if not self.broker.is_market_open():
+                    return RiskDecision(
+                        approved=False,
+                        reason="market_closed",
+                        details={"hint": "Live orders only accepted during market hours"},
+                    )
+            except Exception as e:
+                logger.warning("Market hours check failed, rejecting: %s", e)
+                return RiskDecision(
+                    approved=False,
+                    reason="market_status_unknown",
+                    details={"error": str(e)[:200]},
+                )
+
         max_position_pct = float(os.getenv("MAX_POSITION_PCT", "0.10"))
         account = self.broker.get_account()
         if account and account.equity > 0:

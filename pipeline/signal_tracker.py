@@ -147,6 +147,8 @@ def fetch_price_data(
             exit_price = float(exit_rows.iloc[0]["Close"])
             exit_date_actual = exit_rows.index[0].strftime("%Y-%m-%d")
         
+        if entry_price == 0:
+            return None
         change_pct = ((exit_price - entry_price) / entry_price) * 100
         
         return {

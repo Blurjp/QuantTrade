@@ -272,4 +272,15 @@ class OrderLedger:
         return [dict(r) for r in rows]
 
     def close(self):
-        self._conn.close()
+        if hasattr(self, "_conn") and self._conn:
+            self._conn.close()
+            self._conn = None
+
+    def __del__(self):
+        self.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()

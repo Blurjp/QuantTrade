@@ -231,6 +231,8 @@ def _extract_signal_frame(region_type: str, detection: dict, region_id: str, out
     if backfill_file.exists():
         history = json.loads(backfill_file.read_text())
         stats = history.get("daily_stats") or history.get("weekly_stats") or []
+        if not stats:
+            logger.debug(f"Empty backfill stats for {region_id}")
         frame = pd.DataFrame(stats)
         if not frame.empty and 'date' in frame.columns:
             if not live_frame.empty and 'date' in live_frame.columns:

@@ -25,7 +25,7 @@ CONFIDENCE_WEIGHTS = {
     "Medium": 0.6,
     "Low": 0.25,
 }
-DEFAULT_CONFIRMATIONS = 1
+DEFAULT_CONFIRMATIONS = 2
 
 
 def _meta_signal_text(group_config: Dict, direction: str) -> str:

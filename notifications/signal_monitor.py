@@ -158,76 +158,85 @@ class SignalMonitor:
         try:
             from pipeline.precipitation import PrecipitationMonitor
             monitor = PrecipitationMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("PrecipitationMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked precipitation: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check precipitation: {e}")
         
-        # Check sea surface temperature signals
         try:
             from pipeline.sea_surface_temperature import SeaSurfaceTemperatureMonitor
             monitor = SeaSurfaceTemperatureMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("SeaSurfaceTemperatureMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked SST: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check SST: {e}")
         
-        # Check vegetation health signals
         try:
             from pipeline.vegetation_health import VegetationHealthMonitor
             monitor = VegetationHealthMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("VegetationHealthMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked vegetation: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check vegetation: {e}")
         
-        # Check soil moisture signals
         try:
             from pipeline.soil_moisture import SoilMoistureMonitor
             monitor = SoilMoistureMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("SoilMoistureMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked soil moisture: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check soil moisture: {e}")
         
-        # Check atmospheric signals
         try:
             from pipeline.atmospheric import AtmosphericMonitor
             monitor = AtmosphericMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("AtmosphericMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked atmospheric: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check atmospheric: {e}")
         
-        # Check solar irradiance signals
         try:
             from pipeline.solar_irradiance import SolarIrradianceMonitor
             monitor = SolarIrradianceMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("SolarIrradianceMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked solar irradiance: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check solar irradiance: {e}")
         
-        # Check nighttime lights signals
         try:
             from pipeline.nighttime_lights import NighttimeLightsMonitor
             monitor = NighttimeLightsMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("NighttimeLightsMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked nighttime lights: {len(signals)} signals")
         except Exception as e:
             logger.error(f"Failed to check nighttime lights: {e}")
         
-        # Check thermal infrared signals
         try:
             from pipeline.thermal_infrared import ThermalInfraredMonitor
             monitor = ThermalInfraredMonitor()
+            if not hasattr(monitor, "generate_all_signals"):
+                raise AttributeError("ThermalInfraredMonitor missing generate_all_signals()")
             signals = monitor.generate_all_signals()
             all_signals.extend(signals)
             logger.info(f"Checked thermal IR: {len(signals)} signals")

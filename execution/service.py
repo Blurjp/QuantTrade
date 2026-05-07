@@ -111,7 +111,8 @@ class ExecutionService:
 
         result = self.broker.submit_order(intent)
 
-        self.ledger.update_submitted_at(intent.client_order_id)
+        if result.status in (OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED):
+            self.ledger.update_submitted_at(intent.client_order_id)
 
         self.ledger.update_order_status(
             intent.client_order_id,

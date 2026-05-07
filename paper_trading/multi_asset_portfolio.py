@@ -285,44 +285,40 @@ class MultiAssetPortfolio:
     def close_position(self, ticker: str, price: float, rationale: str = "") -> Optional[Trade]:
         """Close a position."""
         with self._lock:
-            if ticker not in self.positions:
-                return None
-            
-            pos = self.positions[ticker]
-            
-            # Calculate P&L
-            if pos.direction == "long":
-                pnl = pos.quantity * (price - pos.entry_price)
-            else:  # short
-                pnl = pos.quantity * (pos.entry_price - price)
-            
-            # Return/release cash based on direction
-            if pos.direction == "short":
-                # Short close: buy back shares (cash out = original proceeds - cost to buy back)
-                # We already received cash when opening, now pay to buy back
-                self.cash += pnl  # pnl already accounts for entry vs exit price
-            else:
-                # Long close: receive back principal + profit
-                self.cash += pos.position_value + pnl
-            
-            # Record trade
-            trade = Trade(
-                date=date.today().isoformat(),
-                ticker=ticker,
-                action="CLOSE",
-                price=price,
-                quantity=pos.quantity,
-                value=pos.position_value,
-                pnl=pnl,
-                rationale=rationale,
-            )
-            self.trades.append(trade)
-            
-            # Remove position
-            del self.positions[ticker]
-            
-            self._save_state()
-            return trade
+            return self._close_position_unlocked(ticker, price, rationale)
+
+    def _close_position_unlocked(self, ticker: str, price: float, rationale: str = "") -> Optional[Trade]:
+        if ticker not in self.positions:
+            return None
+
+        pos = self.positions[ticker]
+
+        if pos.direction == "long":
+            pnl = pos.quantity * (price - pos.entry_price)
+        else:
+            pnl = pos.quantity * (pos.entry_price - price)
+
+        if pos.direction == "short":
+            self.cash += pnl
+        else:
+            self.cash += pos.position_value + pnl
+
+        trade = Trade(
+            date=date.today().isoformat(),
+            ticker=ticker,
+            action="CLOSE",
+            price=price,
+            quantity=pos.quantity,
+            value=pos.position_value,
+            pnl=pnl,
+            rationale=rationale,
+        )
+        self.trades.append(trade)
+
+        del self.positions[ticker]
+
+        self._save_state()
+        return trade
     
     def update_position_prices(self, prices: Dict[str, float]):
         """Update all position prices and check risk management."""
@@ -341,26 +337,23 @@ class MultiAssetPortfolio:
                     
                     # Check stop loss
                     if current_price <= pos.stop_loss:
-                        trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
+                        trade = self._close_position_unlocked(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
                         if trade:
                             closed_trades.append(trade)
-                    # Check take profit
                     elif current_price >= pos.take_profit:
-                        trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
+                        trade = self._close_position_unlocked(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
                         if trade:
                             closed_trades.append(trade)
                 
                 else:  # short
                     pos.unrealized_pnl = pos.quantity * (pos.entry_price - current_price)
-                    
-                    # Check stop loss
+
                     if current_price >= pos.stop_loss:
-                        trade = self.close_position(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
+                        trade = self._close_position_unlocked(ticker, current_price, f"Stop loss triggered at ${current_price:.2f}")
                         if trade:
                             closed_trades.append(trade)
-                    # Check take profit
                     elif current_price <= pos.take_profit:
-                        trade = self.close_position(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
+                        trade = self._close_position_unlocked(ticker, current_price, f"Take profit triggered at ${current_price:.2f}")
                         if trade:
                             closed_trades.append(trade)
             

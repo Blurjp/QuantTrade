@@ -157,38 +157,39 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                     import yfinance as yf
                     tickers = list(positions.keys())
                     batch = yf.download(tickers, period="1d", progress=False)
-                    if not batch.empty:
+                    if not batch.empty and "Close" in batch.columns:
                         close = batch["Close"]
                         for ticker, pos in positions.items():
-                            if len(tickers) == 1:
-                                price = float(close.iloc[-1])
-                            elif ticker in close.columns:
-                                series = close[ticker].dropna()
-                                if len(series) == 0:
+                            try:
+                                if len(tickers) == 1:
+                                    price = float(close.iloc[-1])
+                                elif ticker in close.columns:
+                                    series = close[ticker].dropna()
+                                    if len(series) == 0:
+                                        continue
+                                    price = float(series.iloc[-1])
+                                else:
                                     continue
-                                price = float(series.iloc[-1])
-                            else:
+
+                                if price != price:
+                                    continue
+
+                                entry = float(pos.get("entry_price", 0))
+                                qty = float(pos.get("quantity", 0))
+                                direction = pos.get("direction", "long")
+
+                                if direction == "long":
+                                    unrealized = qty * (price - entry)
+                                else:
+                                    unrealized = qty * (entry - price)
+
+                                pos["current_price"] = round(price, 2)
+                                pos["unrealized_pnl"] = round(unrealized, 2)
+                                if direction == "long":
+                                    pos["position_value"] = round(qty * price, 2)
+                            except (IndexError, ValueError, TypeError) as e:
+                                logger.debug(f"Price lookup failed for {ticker}: {e}")
                                 continue
-
-                            if price != price:  # NaN check
-                                continue
-
-                            entry = float(pos.get("entry_price", 0))
-                            qty = float(pos.get("quantity", 0))
-                            direction = pos.get("direction", "long")
-
-                            # Recalculate unrealized P&L from live price
-                            if direction == "long":
-                                unrealized = qty * (price - entry)
-                            else:
-                                unrealized = qty * (entry - price)
-
-                            # Update position with live data
-                            pos["current_price"] = round(price, 2)
-                            pos["unrealized_pnl"] = round(unrealized, 2)
-                            # Also update position_value to reflect current market value
-                            if direction == "long":
-                                pos["position_value"] = round(qty * price, 2)
                 except Exception as e:
                     logger.warning(f"Live price refresh failed for /api/portfolio: {e}")
                     # Serve stale data rather than fail
@@ -207,18 +208,23 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 if tickers:
                     batch = yf.download(tickers, period="1d", progress=False)
                     prices = {}
-                    if not batch.empty:
+                    if not batch.empty and "Close" in batch.columns:
                         close = batch["Close"]
-                        if len(tickers) == 1:
-                            val = float(close.iloc[-1])
-                            if val == val:
-                                prices[tickers[0]] = val
-                        else:
-                            for t in tickers:
-                                if t in close.columns:
-                                    val = close[t].iloc[-1]
-                                    if val == val:
-                                        prices[t] = float(val)
+                        try:
+                            if len(tickers) == 1:
+                                val = float(close.iloc[-1])
+                                if val == val:
+                                    prices[tickers[0]] = val
+                            else:
+                                for t in tickers:
+                                    if t in close.columns:
+                                        series = close[t].dropna()
+                                        if len(series) > 0:
+                                            val = float(series.iloc[-1])
+                                            if val == val:
+                                                prices[t] = val
+                        except (IndexError, ValueError, TypeError) as e:
+                            logger.debug(f"Price extraction failed: {e}")
                     self._send_json(prices)
                 else:
                     self._send_json({})

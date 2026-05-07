@@ -19,7 +19,7 @@ ASSET_CLASS_GROUPS = {
     "retail": ["WMT", "COST", "TGT", "HD", "XRT"],
     "industrial": ["CAT", "DE"],
     "china": ["FXI", "KWEB", "BABA", "JD", "MCHI", "ASHR", "KANG"],
-    "emerging_europe": ["EPOL", "EWG", "EWG", "EWO", "EWN"],
+    "emerging_europe": ["EPOL", "EWG", "EWO", "EWN"],
     "metals": ["GLD", "SLV", "Gold", "Silver"],
 }
 

@@ -152,6 +152,10 @@ class Reconciler:
             )
 
             result = self.broker.submit_order(intent)
+
+            if result.status in (OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED):
+                self.ledger.update_submitted_at(coid)
+
             self.ledger.update_order_status(
                 coid,
                 result.status.value,
@@ -162,10 +166,6 @@ class Reconciler:
                     result.filled_at.isoformat() if result.filled_at else None
                 ),
             )
-
-            if result.status in (OrderStatus.FILLED, OrderStatus.ACCEPTED,
-                                  OrderStatus.PARTIALLY_FILLED):
-                self.ledger.update_submitted_at(coid)
 
             report.stranded_resubmitted += 1
             logger.info(

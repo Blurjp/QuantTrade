@@ -32,9 +32,7 @@ class NotificationConfig:
         self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
         self.email_from = os.getenv("EMAIL_FROM", "quanttrade@railway.app")
         self.email_to = os.getenv("EMAIL_TO", "").split(",")
-        
-        # SendGrid settings
-        self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
+
         self.sendgrid_from = os.getenv("SENDGRID_FROM", "quanttrade@noreply.com")
         # SMTP fallback
         self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -136,7 +134,7 @@ class NotificationManager:
     def should_notify(self, signal: Dict) -> bool:
         """Check if signal meets notification criteria."""
         # Check confidence
-        confidence = signal.get("confidence", 0)
+        confidence = float(signal.get("confidence", 0))
         if confidence < self.config.min_confidence:
             logger.info(f"Signal confidence {confidence}% below threshold {self.config.min_confidence}%")
             return False

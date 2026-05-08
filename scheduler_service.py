@@ -266,6 +266,26 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/reconcile":
+            try:
+                from execution.service import ExecutionService
+                from execution.reconciler import Reconciler
+                svc = ExecutionService()
+                reconciler = Reconciler(svc)
+                report = reconciler.run()
+                self._send_json({
+                    "stranded_found": report.stranded_found,
+                    "stranded_cancelled": report.stranded_cancelled,
+                    "stranded_resubmitted": report.stranded_resubmitted,
+                    "strand_resubmit_failed": report.strand_resubmit_failed,
+                    "drift_found": report.drift_found,
+                    "drift_updated": report.drift_updated,
+                    "has_alert": report.has_alert,
+                    "errors": report.errors,
+                })
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
         elif self.path.startswith("/api/outputs/"):
             # Serve any file from outputs/ directory
             from urllib.parse import unquote
@@ -1242,6 +1262,21 @@ def main():
     # Run stop-loss check every 5 minutes (9:30 AM - 4:00 PM ET, Mon-Fri)
     schedule.every(5).minutes.do(run_stop_loss_check)
     logger.info("Stop-loss monitor: every 5 minutes during market hours")
+
+    def run_reconciler():
+        try:
+            from execution.service import ExecutionService
+            from execution.reconciler import Reconciler
+            svc = ExecutionService()
+            reconciler = Reconciler(svc)
+            report = reconciler.run()
+            if report.has_alert:
+                logger.warning("Reconciler alerts: %s", report.summary())
+        except Exception as e:
+            logger.error("Reconciler run failed: %s", e)
+
+    schedule.every(30).minutes.do(run_reconciler)
+    logger.info("Order reconciler: every 30 minutes")
 
     while True:
         schedule.run_pending()

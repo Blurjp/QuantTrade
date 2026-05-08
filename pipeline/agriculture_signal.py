@@ -7,14 +7,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
+import pandas as pd
+
 from pipeline.precipitation import PrecipitationMonitor
 from pipeline.vegetation_health import VegetationHealthMonitor
 
 
 def _confidence_label(score: float) -> str:
-    if score >= 75:
+    # Convert to 0-1 scale if needed (assuming input might be 0-100)
+    if score > 1.0:
+        score = score / 100.0
+    
+    if pd.isna(score):
+        return "Low"  # Default to Low for consistency
+    if score >= 0.75:
         return "High"
-    if score >= 60:
+    if score >= 0.55:
         return "Medium"
     return "Low"
 

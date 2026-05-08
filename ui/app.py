@@ -1333,6 +1333,85 @@ def _render_sidebar_chat(
         st.rerun()
 
 
+def _render_execution_dashboard(st):
+    """Render execution ledger, fills, risk decisions, and reconciler status."""
+    db_path = Path("outputs/execution/orders.sqlite")
+    if not db_path.exists():
+        st.info("No execution ledger found. Run the pipeline in shadow mode first.")
+        return
+
+    import sqlite3
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    col1, col2, col3, col4 = st.columns(4)
+    total = conn.execute("SELECT COUNT(*) as c FROM orders").fetchone()["c"]
+    filled = conn.execute("SELECT COUNT(*) as c FROM orders WHERE status='filled'").fetchone()["c"]
+    rejected = conn.execute("SELECT COUNT(*) as c FROM orders WHERE status='rejected'").fetchone()["c"]
+    pending = conn.execute("SELECT COUNT(*) as c FROM orders WHERE status IN ('pending','accepted')").fetchone()["c"]
+    col1.metric("Total Orders", total)
+    col2.metric("Filled", filled)
+    col3.metric("Rejected", rejected)
+    col4.metric("Pending/Open", pending)
+
+    st.markdown("---")
+    st.markdown("### Recent Orders")
+    rows = conn.execute(
+        "SELECT client_order_id, symbol, side, status, quantity, notional, "
+        "limit_price as filled_avg_price, broker, created_at, filled_at "
+        "FROM orders ORDER BY created_at DESC LIMIT 20"
+    ).fetchall()
+    if rows:
+        df = pd.DataFrame([dict(r) for r in rows])
+        display_cols = [c for c in ["symbol", "side", "status", "quantity", "notional", "filled_avg_price", "broker", "created_at"] if c in df.columns]
+        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+    else:
+        st.info("No orders yet.")
+
+    st.markdown("---")
+    rec_col, alert_col = st.columns(2)
+
+    with rec_col:
+        st.markdown("### Reconciliation Runs")
+        rec_rows = conn.execute(
+            "SELECT run_at, status, orders_drift, fills_missing, alert "
+            "FROM reconciliation_runs ORDER BY run_at DESC LIMIT 5"
+        ).fetchall()
+        if rec_rows:
+            for r in rec_rows:
+                icon = "OK" if r["status"] == "ok" else "ALERT"
+                st.markdown(f"- **{r['run_at'][:19]}** {icon} drift={r['orders_drift']} missing={r['fills_missing']}")
+        else:
+            st.info("No reconciliation runs yet.")
+
+    with alert_col:
+        st.markdown("### Alert History")
+        alert_path = Path("outputs/execution/alert_history.json")
+        if alert_path.exists():
+            try:
+                alerts = json.loads(alert_path.read_text())
+                for a in alerts[-5:]:
+                    color = {"ORDER_FILLED": "green", "ORDER_REJECTED": "red", "RECONCILER_ALERT": "orange"}.get(a.get("type", ""), "blue")
+                    st.markdown(f"- :{color}[**{a.get('type', '')}**] {a.get('timestamp', '')[:19]} — {a.get('symbol', a.get('stranded', ''))}")
+            except Exception:
+                st.info("Could not load alerts.")
+        else:
+            st.info("No alerts recorded.")
+
+    st.markdown("---")
+    st.markdown("### Risk Gate Decisions")
+    risk_rows = conn.execute(
+        "SELECT client_order_id, approved, reason, details, created_at "
+        "FROM risk_decisions ORDER BY created_at DESC LIMIT 10"
+    ).fetchall()
+    if risk_rows:
+        risk_df = pd.DataFrame([dict(r) for r in risk_rows])
+        risk_df["approved"] = risk_df["approved"].map({1: "YES", 0: "NO"})
+        st.dataframe(risk_df, use_container_width=True, hide_index=True)
+
+    conn.close()
+
+
 def _render_portfolio_monitor(st):
     """Render real-time portfolio monitoring section"""
     from datetime import datetime
@@ -1658,8 +1737,8 @@ def main():
     summary_day = _resolve_summary_day(output_base, selected_day)
 
     # --- 4 Tabs ---
-    tab_portfolio, tab_signals, tab_trade, tab_backtests = st.tabs(
-        ["Portfolio", "Signals", "Trading", "Backtests"]
+    tab_portfolio, tab_signals, tab_trade, tab_exec, tab_backtests = st.tabs(
+        ["Portfolio", "Signals", "Trading", "Execution", "Backtests"]
     )
 
     with tab_portfolio:
@@ -1759,6 +1838,9 @@ def main():
             if plot_columns:
                 st.markdown("**Signal History**")
                 st.line_chart(signal_series.set_index("date")[plot_columns], use_container_width=True)
+
+    with tab_exec:
+        _render_execution_dashboard(st)
 
     with tab_backtests:
         summaries = _load_latest_backtests(output_base, selected_region)

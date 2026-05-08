@@ -333,6 +333,39 @@ def _update_journal_entry(target_date: str, summary: Dict, output_base: str) -> 
         lines.append("")
         lines.append(f"_See: `outputs/daily_reports/report_{target_date}.md`_")
 
+    ledger_path = Path(output_base) / "execution" / "orders.sqlite"
+    if ledger_path.exists():
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(ledger_path))
+            conn.row_factory = sqlite3.Row
+            day_orders = conn.execute(
+                "SELECT symbol, side, status, quantity, notional, limit_price, created_at "
+                "FROM orders WHERE date(created_at) = ? ORDER BY created_at",
+                (target_date,),
+            ).fetchall()
+            day_risk = conn.execute(
+                "SELECT COUNT(*) as c FROM risk_decisions WHERE approved=0 AND date(created_at) = ?",
+                (target_date,),
+            ).fetchone()["c"]
+            conn.close()
+
+            if day_orders:
+                lines.append("")
+                lines.append("## Execution Orders")
+                lines.append("")
+                lines.append("| Symbol | Side | Status | Qty | Notional | Time |")
+                lines.append("|--------|------|--------|-----|----------|------|")
+                for o in day_orders:
+                    ts = o["created_at"][11:16] if o["created_at"] else ""
+                    qty = f"{o['quantity']:.1f}" if o["quantity"] else ""
+                    notional = f"${o['notional']:.0f}" if o["notional"] else ""
+                    lines.append(f"| {o['symbol']} | {o['side']} | {o['status']} | {qty} | {notional} | {ts} |")
+                if day_risk > 0:
+                    lines.append(f"\n_{day_risk} order(s) rejected by risk gate._")
+        except Exception:
+            pass
+
     _write_page(JOURNAL_DIR / f"{target_date}.md", "\n".join(lines))
 
 

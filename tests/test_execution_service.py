@@ -27,6 +27,7 @@ from execution.models import (
     PositionIntent,
     TimeInForce,
 )
+from execution.brokers.alpaca import AlpacaBrokerClient
 from execution.brokers.shadow import ShadowBrokerClient
 from execution.ledger import OrderLedger
 from execution.service import ExecutionService
@@ -339,15 +340,34 @@ class TestShadowOverridesAlpaca:
             broker_module = type(svc.broker).__module__
             assert "alpaca" not in broker_module
 
-    def test_paper_mode_uses_shadow(self, tmp_path):
+    def test_paper_mode_uses_alpaca(self, tmp_path):
         db = tmp_path / "test_orders.sqlite"
         halt = tmp_path / "HALT_TRADING"
-        svc = ExecutionService(
-            ledger_path=str(db),
-            execution_mode="paper",
-            halt_trading_path=str(halt),
-        )
-        assert isinstance(svc.broker, ShadowBrokerClient)
+        with patch.dict(os.environ, {
+            "ALPACA_API_KEY": "PKTEST123",
+            "ALPACA_SECRET_KEY": "SECRETTEST456",
+            "ALPACA_PAPER": "true",
+        }):
+            svc = ExecutionService(
+                ledger_path=str(db),
+                execution_mode="paper",
+                halt_trading_path=str(halt),
+            )
+            assert isinstance(svc.broker, AlpacaBrokerClient)
+
+    def test_paper_mode_requires_alpaca_keys(self, tmp_path):
+        db = tmp_path / "test_orders.sqlite"
+        halt = tmp_path / "HALT_TRADING"
+        with patch.dict(os.environ, {
+            "ALPACA_API_KEY": "",
+            "ALPACA_SECRET_KEY": "",
+        }, clear=True):
+            with pytest.raises(RuntimeError, match="ALPACA_API_KEY"):
+                ExecutionService(
+                    ledger_path=str(db),
+                    execution_mode="paper",
+                    halt_trading_path=str(halt),
+                )
 
 
 class TestLiveModeRequiresExplicitEnable:

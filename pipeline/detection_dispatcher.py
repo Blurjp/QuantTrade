@@ -43,7 +43,7 @@ def run_detection(
     # Route to appropriate detection module
     if normalized_type in ("agriculture", "agricultural"):
         return _run_agriculture_detection(aoi_path, target_date, output_base, **kwargs)
-    elif normalized_type in ("oil_storage", "oil_storage"):
+    elif normalized_type in ("oil_storage",):
         return _run_oil_storage_detection(aoi_path, target_date, output_base, **kwargs)
     elif normalized_type in ("chokepoint", "port_logistics"):
         return _run_chokepoint_detection(aoi_path, target_date, output_base, **kwargs)
@@ -187,16 +187,33 @@ def _run_chokepoint_detection(
 
     # Placeholder for now - would integrate with ship detection
     logger.info(f"Chokepoint detection for {region_id} on {target_date} (simulated)")
+    # Use region-specific baseline values instead of hardcoded values
+    baseline_detections = {
+        "hormuz": 20,
+        "bab_el_mandeb": 15,
+        "suez_south": 25,
+        "panama": 30,
+        "danish_straits": 10,
+    }.get(region_id, 15)  # Default to 15 if region not found
+    
+    baseline_throughput = {
+        "hormuz": 0.8,
+        "bab_el_mandeb": 0.6,
+        "suez_south": 0.9,
+        "panama": 0.7,
+        "danish_straits": 0.5,
+    }.get(region_id, 0.75)  # Default to 0.75 if region not found
+    
     return {
         "date": target_date,
         "type": "chokepoint",
         "status": "simulated",
         "region": region_id,
-        "count": 15,
+        "count": 1,
         "details": [{
             "date": target_date,
-            "detections": 15,
-            "throughput_index": 0.75,
+            "detections": baseline_detections,
+            "throughput_index": baseline_throughput,
         }],
         "metadata": {"status": "success", "note": "Simulated data"},
         "is_real_data": False,

@@ -78,13 +78,25 @@ class ExecutionService:
                     f"portfolio.open_position(). Set BROKER=alpaca or switch "
                     f"to EXECUTION_MODE=shadow."
                 )
+        elif self.execution_mode == "paper":
+            broker_name = os.getenv("BROKER", "alpaca")
+            if broker_name == "alpaca":
+                from execution.brokers.alpaca import AlpacaBrokerClient
+                self.broker = AlpacaBrokerClient(paper=True)
+            else:
+                raise RuntimeError(
+                    f"EXECUTION_MODE=paper but BROKER='{broker_name}'. "
+                    f"Only alpaca is supported for paper trading. "
+                    f"Set BROKER=alpaca or switch to EXECUTION_MODE=shadow."
+                )
         else:
             self.broker = ShadowBrokerClient()
 
         logger.info(
-            "ExecutionService initialized: mode=%s broker=%s",
+            "ExecutionService initialized: mode=%s broker=%s broker_env=%s",
             self.execution_mode,
             type(self.broker).__name__,
+            os.getenv("BROKER", "(unset)"),
         )
 
     def submit(self, intent: OrderIntent) -> OrderResult:
@@ -137,6 +149,28 @@ class ExecutionService:
                 timestamp=result.filled_at or datetime.now(timezone.utc),
             )
             self.ledger.insert_fill(fill)
+            try:
+                from execution.alerting import alert_order_filled
+                alert_order_filled(
+                    symbol=intent.symbol,
+                    side=intent.side.value,
+                    filled_qty=result.filled_qty,
+                    filled_price=result.filled_avg_price,
+                    coid=intent.client_order_id,
+                )
+            except Exception as exc:
+                logger.debug("Alert failed for fill %s: %s", intent.client_order_id, exc)
+
+        if result.status == OrderStatus.REJECTED:
+            try:
+                from execution.alerting import alert_order_rejected
+                alert_order_rejected(
+                    symbol=intent.symbol,
+                    reason=result.rejection_reason or risk.reason,
+                    coid=intent.client_order_id,
+                )
+            except Exception as exc:
+                logger.debug("Alert failed for reject %s: %s", intent.client_order_id, exc)
 
         return result
 

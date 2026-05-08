@@ -97,10 +97,10 @@ class AlpacaBrokerClient:
 
         mode = "paper" if self._paper else "live"
         logger.info(
-            "AlpacaBrokerClient initialized (%s mode, key=%s...%s)",
+            "AlpacaBrokerClient initialized (%s mode, key=%s***%s)",
             mode,
-            self._api_key[:4],
-            self._api_key[-4:],
+            self._api_key[:2],
+            self._api_key[-2:],
         )
 
     def submit_order(self, intent: OrderIntent) -> OrderResult:

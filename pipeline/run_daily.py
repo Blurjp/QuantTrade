@@ -458,11 +458,13 @@ def run_daily_pipeline(
     from pipeline.asset_tracker import record_daily_assets
     from pipeline.price_feed import get_prices_for_portfolio
 
-    portfolio = MultiAssetPortfolio(output_base=output_base)
-    prices = get_prices_for_portfolio(portfolio)
-    total_value = portfolio.get_total_value(prices)
-
-    record_daily_assets(total_value, target_date, output_base=output_base)
+    try:
+        portfolio = MultiAssetPortfolio(output_base=output_base)
+        prices = get_prices_for_portfolio(portfolio)
+        total_value = portfolio.get_total_value(prices)
+        record_daily_assets(total_value, target_date, output_base=output_base)
+    except Exception as e:
+        logger.warning(f"Failed to track daily assets: {e}")
 
     try:
         from pipeline.wiki_ingest import ingest_daily_summary

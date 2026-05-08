@@ -28,9 +28,15 @@ logger = logging.getLogger(__name__)
 
 
 def _confidence_label(score: float) -> str:
-    if score >= 75:
+    # Convert to 0-1 scale if needed (assuming input might be 0-100)
+    if score > 1.0:
+        score = score / 100.0
+    
+    if pd.isna(score):
+        return "Unknown"
+    if score >= 0.75:
         return "High"
-    if score >= 60:
+    if score >= 0.55:
         return "Medium"
     return "Low"
 

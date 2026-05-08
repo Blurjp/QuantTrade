@@ -95,6 +95,19 @@ class Reconciler:
         )
 
         logger.info(report.summary())
+
+        try:
+            from execution.alerting import alert_reconciler
+            alert_reconciler(
+                stranded_found=report.stranded_found,
+                stranded_cancelled=report.stranded_cancelled,
+                stranded_resubmitted=report.stranded_resubmitted,
+                drift_found=report.drift_found,
+                errors=report.errors,
+            )
+        except Exception:
+            pass
+
         return report
 
     def _reconcile_stranded(self, report: ReconcileReport):

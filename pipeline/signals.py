@@ -223,7 +223,7 @@ def _apply_reroute_logic(signal_df: pd.DataFrame, region_id: str, output_base: s
         df = df.merge(peer_table, on="date", how="left")
 
     peer_cols = [column for column in df.columns if column.endswith("_signal")]
-    reroute_mask = (df["signal"] == "Long disruption risk") & False
+    reroute_mask = False
     for col in peer_cols:
         reroute_mask = reroute_mask | (
             (df["signal"] == "Long disruption risk")

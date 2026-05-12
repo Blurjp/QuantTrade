@@ -13,6 +13,9 @@ import schedule
 import threading
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(
@@ -498,7 +501,16 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 def start_health_server(port=8080):
     """Start HTTP server for health checks in a background thread."""
     from http.server import ThreadingHTTPServer
-    server = ThreadingHTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    import socket
+    class ReusableHTTPServer(ThreadingHTTPServer):
+        allow_reuse_address = True
+        allow_reuse_port = True
+    try:
+        server = ReusableHTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    except OSError:
+        port = port + 1
+        logger.warning(f"Port {port-1} in use, trying {port}")
+        server = ReusableHTTPServer(("0.0.0.0", port), HealthCheckHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info(f"Health check server started on port {port} (ThreadingHTTPServer)")

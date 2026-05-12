@@ -519,88 +519,51 @@ def start_health_server(port=8080):
 
 def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
     """
-    Run all satellite monitoring modules.
+    Run all satellite monitoring modules in parallel.
 
     Automatically uses real satellite data when available (auto-detected).
     """
     from pipeline.satellite_data import get_capabilities
+    import concurrent.futures
 
     caps = get_capabilities()
     logger.info(f"Satellite data capabilities: Real={caps['real_data_enabled']}, PC={caps['planetary_computer']['available']}")
 
+    def _run_module(name, module_path, class_name, method="generate_all_signals", **kwargs):
+        try:
+            mod = __import__(module_path, fromlist=[class_name])
+            cls = getattr(mod, class_name)
+            monitor = cls(output_base=output_base)
+            fn = getattr(monitor, method)
+            signals = fn(target_date) if method == "generate_all_signals" else fn()
+            return name, signals
+        except Exception as e:
+            logger.warning(f"{name} failed: {e}")
+            return name, []
+
+    module_defs = [
+        ("Vegetation health", "pipeline.vegetation_health", "VegetationHealthMonitor"),
+        ("SST", "pipeline.sea_surface_temperature", "SeaSurfaceTemperatureMonitor"),
+        ("Solar irradiance", "pipeline.solar_irradiance", "SolarIrradianceMonitor"),
+        ("Atmospheric", "pipeline.atmospheric", "AtmosphericMonitor"),
+        ("Thermal infrared", "pipeline.thermal_infrared", "ThermalInfraredMonitor"),
+        ("Nighttime lights", "pipeline.nighttime_lights", "NighttimeLightsMonitor"),
+        ("Precipitation", "pipeline.precipitation", "PrecipitationMonitor"),
+    ]
+
     all_signals = []
 
-    # Vegetation Health
-    try:
-        from pipeline.vegetation_health import VegetationHealthMonitor
-        monitor = VegetationHealthMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Vegetation health: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Vegetation health failed: {e}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_run_module, name, mod, cls): name
+            for name, mod, cls in module_defs
+        }
+        for future in concurrent.futures.as_completed(futures):
+            name, signals = future.result()
+            all_signals.extend(signals)
+            logger.info(f"{name}: {len(signals)} signals")
 
-    # Sea Surface Temperature
-    try:
-        from pipeline.sea_surface_temperature import SeaSurfaceTemperatureMonitor
-        monitor = SeaSurfaceTemperatureMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"SST: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"SST failed: {e}")
-
-    # Solar Irradiance
-    try:
-        from pipeline.solar_irradiance import SolarIrradianceMonitor
-        monitor = SolarIrradianceMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Solar irradiance: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Solar irradiance failed: {e}")
-
-    # Atmospheric
-    try:
-        from pipeline.atmospheric import AtmosphericMonitor
-        monitor = AtmosphericMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Atmospheric: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Atmospheric failed: {e}")
-
-    # Thermal Infrared
-    try:
-        from pipeline.thermal_infrared import ThermalInfraredMonitor
-        monitor = ThermalInfraredMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Thermal infrared: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Thermal infrared failed: {e}")
-
-    # Nighttime Lights
-    try:
-        from pipeline.nighttime_lights import NighttimeLightsMonitor
-        monitor = NighttimeLightsMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Nighttime lights: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Nighttime lights failed: {e}")
-
-    # Precipitation
-    try:
-        from pipeline.precipitation import PrecipitationMonitor
-        monitor = PrecipitationMonitor(output_base=output_base)
-        signals = monitor.generate_all_signals(target_date)
-        all_signals.extend(signals)
-        logger.info(f"Precipitation: {len(signals)} signals")
-    except Exception as e:
-        logger.warning(f"Precipitation failed: {e}")
-
-    # Cattle Feedlot
+    # Cattle Feedlot (separate — different API)
     try:
         from pipeline.cattle_feedlot import CattleFeedlotMonitor
         cattle_monitor = CattleFeedlotMonitor(output_base=output_base)
@@ -610,7 +573,6 @@ def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
     except Exception as e:
         logger.warning(f"Cattle feedlot failed: {e}")
 
-    # Count actionable
     actionable = sum(1 for s in all_signals if s.get("direction") != "neutral")
     logger.info(f"Satellite monitors total: {len(all_signals)} signals, {actionable} actionable")
 
@@ -662,6 +624,40 @@ def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
             if trade:
                 closed_positions.append((ticker, trade, reason))
                 logger.info(f"AUTO-CLOSE {ticker}: {reason} @ ${current_price:.2f} P&L=${trade.pnl:+.2f}")
+
+                # Also close on Alpaca if paper/live trading
+                try:
+                    from execution.service import ExecutionService
+                    from execution.models import (
+                        OrderIntent, OrderSide, OrderType,
+                        TimeInForce, PositionIntent,
+                    )
+                    from datetime import datetime as _dt, timezone as _tz
+                    exec_svc = ExecutionService()
+                    if hasattr(exec_svc.broker, 'get_positions'):
+                        broker_pos = {p.symbol: p for p in exec_svc.broker.get_positions()}
+                        if ticker in broker_pos:
+                            bp = broker_pos[ticker]
+                            qty_to_close = float(bp.qty)
+                            if qty_to_close > 0:
+                                close_intent = OrderIntent(
+                                    symbol=ticker,
+                                    side=OrderSide.SELL,
+                                    quantity=qty_to_close,
+                                    order_type=OrderType.MARKET,
+                                    time_in_force=TimeInForce.DAY,
+                                    client_order_id=exec_svc.make_client_order_id(
+                                        "sl", ticker, "sell",
+                                        _dt.now(_tz.utc).strftime("%Y%m%d%H%M"),
+                                    ),
+                                    created_at=_dt.now(_tz.utc),
+                                    position_intent=PositionIntent.CLOSE_POSITION,
+                                    rationale=reason,
+                                )
+                                close_result = exec_svc.submit(close_intent)
+                                logger.info(f"Alpaca close {ticker}: {close_result.status.value}")
+                except Exception as alp_err:
+                    logger.warning(f"Alpaca close failed for {ticker}: {alp_err}")
 
                 # Track in signal history
                 if signal_tracker:

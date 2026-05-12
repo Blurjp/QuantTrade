@@ -263,7 +263,9 @@ class BayesianSignalFusion:
             
             # Combined reliability: signal_type reliability × region reliability
             # Use geometric mean to be conservative
-            reliability = math.sqrt(st_stats["win_rate"] * r_stats["win_rate"])
+            # Floor at 0.55 so unlearned sources still contribute evidence
+            raw_reliability = math.sqrt(st_stats["win_rate"] * r_stats["win_rate"])
+            reliability = max(raw_reliability, 0.6)
             
             # Bayesian update: log-odds += log(reliability / (1 - reliability)) * confidence
             # This means: if reliability > 0.5 (better than random), positive evidence
@@ -376,7 +378,7 @@ class BayesianSignalFusion:
             if fused["direction"] == "neutral":
                 continue
             
-            if fused["fused_confidence"] < 60:
+            if fused["fused_confidence"] < 55:
                 continue  # Too uncertain
             
             position_value = cash * fused["kelly_fraction"]

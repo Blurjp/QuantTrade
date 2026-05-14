@@ -35,6 +35,7 @@ last_run_time = None
 last_run_status = "never"
 pipeline_runs = 0
 OUTPUT_BASE = "outputs"
+pipeline_lock = threading.Lock()
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -553,7 +554,10 @@ def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
 
     all_signals = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    max_workers = max(1, int(os.environ.get("SATELLITE_MAX_WORKERS", "1")))
+    logger.info(f"Satellite monitor workers: {max_workers}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(_run_module, name, mod, cls): name
             for name, mod, cls in module_defs
@@ -731,7 +735,7 @@ def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
         portfolio._save_state()
 
 
-def run_daily_pipeline():
+def _run_daily_pipeline_impl():
     global last_run_time, last_run_status, pipeline_runs
 
     from scripts.run_daily import run_daily_pipeline as _run_pipeline
@@ -740,31 +744,14 @@ def run_daily_pipeline():
     logger.info(f"Starting pipeline for {today}")
     last_run_time = datetime.now().isoformat()
 
-    # Run satellite monitors with TIMEOUT to prevent infinite I/O blocking
-    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))
-    logger.info(f"Running satellite monitoring modules (timeout={PIPELINE_TIMEOUT}s)...")
+    # Run satellite monitors inside the child process. The parent process owns
+    # timeout/termination so running native geospatial code cannot leak memory.
+    logger.info("Running satellite monitoring modules...")
     try:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_satellite_monitors, today, "outputs")
-            try:
-                satellite_signals = future.result(timeout=PIPELINE_TIMEOUT)
-                logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
-            except concurrent.futures.TimeoutError:
-                logger.warning(f"Satellite monitoring TIMED OUT after {PIPELINE_TIMEOUT}s, continuing...")
-                future.cancel()
+        satellite_signals = run_satellite_monitors(today, "outputs")
+        logger.info(f"Satellite monitoring complete: {len(satellite_signals)} signals")
     except Exception as e:
         logger.error(f"Satellite monitoring failed: {e}")
-
-    # Check signals and send notifications
-    logger.info("Checking signals for notifications...")
-    try:
-        from notifications.signal_monitor import SignalMonitor
-        monitor = SignalMonitor()
-        summary = monitor.check_all_modules()
-        logger.info(f"Signal check complete: {summary['actionable_signals']} actionable, {summary['notified']} notifications sent")
-    except Exception as e:
-        logger.error(f"Signal monitoring failed: {e}")
 
     # Run main pipeline
     try:
@@ -1134,6 +1121,68 @@ def run_daily_pipeline():
     pipeline_runs += 1
 
 
+def _run_daily_pipeline_child(status_queue):
+    try:
+        _run_daily_pipeline_impl()
+        status_queue.put(("success", None))
+    except Exception as exc:
+        logger.exception("Pipeline child crashed")
+        status_queue.put(("failed", str(exc)[:200]))
+
+
+def run_daily_pipeline():
+    """Run one pipeline cycle in a child process so heavy native memory is reclaimed."""
+    global last_run_time, last_run_status, pipeline_runs
+
+    if not pipeline_lock.acquire(blocking=False):
+        logger.warning("Pipeline already running, skipping overlapping cycle")
+        last_run_status = "skipped: already running"
+        return
+
+    try:
+        import multiprocessing as mp
+
+        timeout_seconds = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "900"))
+        last_run_time = datetime.now().isoformat()
+        last_run_status = "running"
+
+        queue = mp.Queue()
+        proc = mp.Process(target=_run_daily_pipeline_child, args=(queue,), daemon=False)
+        proc.start()
+        logger.info("Pipeline child started: pid=%s timeout=%ss", proc.pid, timeout_seconds)
+        proc.join(timeout_seconds)
+
+        if proc.is_alive():
+            logger.error("Pipeline child timed out after %ss, terminating pid=%s", timeout_seconds, proc.pid)
+            proc.terminate()
+            proc.join(30)
+            if proc.is_alive():
+                logger.error("Pipeline child did not terminate cleanly, killing pid=%s", proc.pid)
+                proc.kill()
+                proc.join(10)
+            last_run_status = "failed: timeout"
+            return
+
+        if proc.exitcode != 0:
+            last_run_status = f"failed: child exit {proc.exitcode}"
+            logger.error("Pipeline child exited with code %s", proc.exitcode)
+            return
+
+        try:
+            status, message = queue.get(timeout=5)
+        except Exception:
+            status, message = "success", None
+        if status == "success":
+            pipeline_runs += 1
+            last_run_status = "success"
+            logger.info("Pipeline child completed successfully")
+        else:
+            last_run_status = f"failed: {message or 'unknown'}"
+            logger.error("Pipeline child failed: %s", message)
+    finally:
+        pipeline_lock.release()
+
+
 def ensure_backfill_data(output_base: str = "outputs") -> bool:
     """
     Ensure backfill data exists for all active regions.
@@ -1237,21 +1286,9 @@ def main():
     # Mark as ready for health checks
     last_run_status = "initialized"
 
-    # Run pipeline in background thread after short delay
-    # This allows the health check to pass while pipeline runs
-    PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "300"))
-
     def delayed_start():
         time.sleep(5)  # Give health server time to start
-        # Run pipeline with timeout using a separate thread
-        def _run_with_timeout():
-            run_daily_pipeline()
-
-        t = threading.Thread(target=_run_with_timeout, daemon=True)
-        t.start()
-        t.join(timeout=PIPELINE_TIMEOUT)  # Wait max PIPELINE_TIMEOUT seconds
-        if t.is_alive():
-            logger.warning(f"First pipeline run timed out after {PIPELINE_TIMEOUT}s, will retry next cycle")
+        run_daily_pipeline()
 
     initial_thread = threading.Thread(target=delayed_start, daemon=True)
     initial_thread.start()

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Fallback prices (used when API unavailable)
 # Last updated: 2026-03-09 (from Yahoo Finance)
+DEFAULT_PRICES_DATE = "2026-03-09"
 DEFAULT_PRICES = {
     # Commodities / Commodity ETFs
     "WTI": 86.0,
@@ -259,14 +260,23 @@ def fetch_all_prices(
 def get_price(ticker: str) -> float:
     """
     Get price for a single ticker.
-    
+
     Tries Yahoo Finance first, falls back to defaults.
     """
     price = fetch_price_yahoo(ticker)
-    
+
     if price is None:
-        price = DEFAULT_PRICES.get(_normalize_ticker(ticker), 0)
-    
+        norm = _normalize_ticker(ticker)
+        if norm in DEFAULT_PRICES:
+            price = DEFAULT_PRICES[norm]
+            logger.warning(
+                "Using stale default price for %s ($%.2f, last updated %s)",
+                ticker, price, DEFAULT_PRICES_DATE,
+            )
+        else:
+            logger.warning("No price available for %s (not in defaults)", ticker)
+            price = 0
+
     return price
 
 
@@ -299,8 +309,23 @@ def get_prices_for_portfolio(portfolio) -> Dict[str, float]:
 
     prices = fetch_all_prices(list(tickers))
 
-    # Ensure no None values
-    return {k: v if v is not None else DEFAULT_PRICES.get(k, 0) for k, v in prices.items()}
+    # fetch_all_prices omits tickers that failed API lookup — fill from defaults
+    result = dict(prices)
+    stale_tickers = []
+    for t in tickers:
+        if t not in result:
+            fallback = DEFAULT_PRICES.get(t, 0)
+            result[t] = fallback
+            if t in DEFAULT_PRICES:
+                stale_tickers.append(t)
+            else:
+                logger.warning("No price available for %s (not in defaults)", t)
+    if stale_tickers:
+        logger.warning(
+            "Using stale default prices for %d tickers (last updated %s): %s",
+            len(stale_tickers), DEFAULT_PRICES_DATE, ", ".join(stale_tickers),
+        )
+    return result
 
 
 if __name__ == "__main__":

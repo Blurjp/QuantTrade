@@ -10,7 +10,10 @@ from pathlib import Path
 import json
 import sys
 from datetime import datetime
+import html
 import time
+
+_esc = html.escape
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -260,17 +263,17 @@ def main():
             
             st.markdown(f"""
             <div class="position-card {card_class}">
-                <h4>{ticker} - {direction}</h4>
-                <p><strong>Entry:</strong> ${pos['Entry Price']:.2f} | 
-                   <strong>Current:</strong> ${pos['Current Price']:.2f} | 
+                <h4>{_esc(str(ticker))} - {_esc(str(direction))}</h4>
+                <p><strong>Entry:</strong> ${pos['Entry Price']:.2f} |
+                   <strong>Current:</strong> ${pos['Current Price']:.2f} |
                    <strong>Value:</strong> ${pos['Position Value']:,.2f}</p>
                 <p style="color: {pnl_color}; font-size: 18px; font-weight: bold;">
                    P&L: ${pnl:+,.2f} ({pnl_pct:+.2f}%)
                 </p>
-                <p><strong>Stop:</strong> ${pos['Stop Loss']:.2f} | 
+                <p><strong>Stop:</strong> ${pos['Stop Loss']:.2f} |
                    <strong>Target:</strong> ${pos['Take Profit']:.2f}</p>
-                <p><strong>Signal Grade:</strong> {pos['Signal Grade']} ⭐ | 
-                   <strong>Accuracy:</strong> {pos['Accuracy']}</p>
+                <p><strong>Signal Grade:</strong> {_esc(str(pos['Signal Grade']))} |
+                   <strong>Accuracy:</strong> {_esc(str(pos['Accuracy']))}</p>
             </div>
             """, unsafe_allow_html=True)
     else:

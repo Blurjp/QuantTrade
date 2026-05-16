@@ -5,11 +5,14 @@ Run with:
   streamlit run ui/app.py
 """
 
+import html
 import os
 from pathlib import Path
 import json
 import sys
 from typing import Dict, List, Optional, Tuple
+
+_esc = html.escape
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -605,11 +608,11 @@ def _render_signal_card(st, region_id: str, signal: Dict) -> None:
     st.markdown(
         f"""
         <div style="background:{bg}; border-left:6px solid {accent}; padding:16px 18px; border-radius:14px; min-height:180px;">
-          <div style="font-size:12px; letter-spacing:.08em; color:{accent}; font-weight:700;">{region_id}</div>
-          <div style="font-size:30px; font-weight:800; color:#1f2a2e; margin-top:6px;">{signal.get('trading_action', 'FLAT')}</div>
-          <div style="font-size:14px; color:#44525a; margin-top:4px;">{signal.get('confidence', 'Low')} / {signal.get('actionability', 'Ignore')}</div>
-          <div style="font-size:16px; color:#1f2a2e; margin-top:10px; font-weight:600;">{signal.get('signal', 'No data')}</div>
-          <div style="font-size:13px; color:#44525a; margin-top:8px;">标的: {instruments}</div>
+          <div style="font-size:12px; letter-spacing:.08em; color:{accent}; font-weight:700;">{_esc(region_id)}</div>
+          <div style="font-size:30px; font-weight:800; color:#1f2a2e; margin-top:6px;">{_esc(str(signal.get('trading_action', 'FLAT')))}</div>
+          <div style="font-size:14px; color:#44525a; margin-top:4px;">{_esc(str(signal.get('confidence', 'Low')))} / {_esc(str(signal.get('actionability', 'Ignore')))}</div>
+          <div style="font-size:16px; color:#1f2a2e; margin-top:10px; font-weight:600;">{_esc(str(signal.get('signal', 'No data')))}</div>
+          <div style="font-size:13px; color:#44525a; margin-top:8px;">标的: {_esc(instruments)}</div>
           <div style="font-size:13px; color:#44525a; margin-top:4px;">score: {score_text}</div>
         </div>
         """,
@@ -955,11 +958,11 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
                 st.markdown(
                     f"""
                     <div style="background:{action_bg}; border:3px solid {action_color}; border-radius:12px; padding:16px; text-align:center;">
-                        <div style="font-size:14px; color:#666; font-weight:600;">{meta_id}</div>
-                        <div style="font-size:42px; font-weight:900; color:{action_color}; margin:8px 0;">{action_display}</div>
-                        <div style="font-size:16px; color:#333;">{action_cn}</div>
-                        <div style="font-size:13px; color:#666; margin-top:8px;">{action_hint}</div>
-                        <div style="font-size:12px; color:#888; margin-top:4px;">置信度: {confidence} | 标的: {instruments}</div>
+                        <div style="font-size:14px; color:#666; font-weight:600;">{_esc(str(meta_id))}</div>
+                        <div style="font-size:42px; font-weight:900; color:{action_color}; margin:8px 0;">{_esc(str(action_display))}</div>
+                        <div style="font-size:16px; color:#333;">{_esc(str(action_cn))}</div>
+                        <div style="font-size:13px; color:#666; margin-top:8px;">{_esc(str(action_hint))}</div>
+                        <div style="font-size:12px; color:#888; margin-top:4px;">置信度: {_esc(str(confidence))} | 标的: {_esc(str(instruments))}</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -998,8 +1001,8 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
         f"""
         <div style="background:{verdict_bg}; border:1px solid #d8cfbf; border-radius:18px; padding:18px 22px; margin:8px 0 18px;">
           <div style="font-size:12px; letter-spacing:.12em; color:{verdict_accent}; font-weight:700;">UNIFIED DAILY VERDICT</div>
-          <div style="font-size:36px; font-weight:800; color:#1f2a2e; margin-top:8px;">{verdict['label']}</div>
-          <div style="font-size:16px; color:#46545b; margin-top:8px;">{verdict['reason']}</div>
+          <div style="font-size:36px; font-weight:800; color:#1f2a2e; margin-top:8px;">{_esc(str(verdict['label']))}</div>
+          <div style="font-size:16px; color:#46545b; margin-top:8px;">{_esc(str(verdict['reason']))}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1020,9 +1023,9 @@ def _render_ranked_today_board(st, selected_day: str, summary: Dict, output_base
             f"""
             <div style="background:linear-gradient(135deg, {bg}, #fffdf7); border:1px solid #d9cfbb; border-radius:18px; padding:20px 24px; margin:8px 0 18px;">
               <div style="font-size:12px; letter-spacing:.12em; color:{accent}; font-weight:700;">TODAY'S TOP TRADE</div>
-              <div style="font-size:34px; font-weight:800; color:#1f2a2e; margin-top:8px;">{top_region} → {top_signal.get('trading_action')}</div>
-              <div style="font-size:18px; color:#334047; margin-top:6px;">{top_signal.get('signal')}</div>
-              <div style="font-size:14px; color:#5d6970; margin-top:10px;">标的: {instruments} | 置信度: {top_signal.get('confidence')} | actionability: {top_signal.get('actionability')}</div>
+              <div style="font-size:34px; font-weight:800; color:#1f2a2e; margin-top:8px;">{_esc(str(top_region))} → {_esc(str(top_signal.get('trading_action')))}</div>
+              <div style="font-size:18px; color:#334047; margin-top:6px;">{_esc(str(top_signal.get('signal')))}</div>
+              <div style="font-size:14px; color:#5d6970; margin-top:10px;">标的: {_esc(str(instruments))} | 置信度: {_esc(str(top_signal.get('confidence')))} | actionability: {_esc(str(top_signal.get('actionability')))}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1565,13 +1568,13 @@ def _render_portfolio_monitor(st):
             pnl_color = "green" if pnl >= 0 else "red"
             direction_emoji = "🔴" if direction == "short" else "🟢"
 
-            st.markdown(f"**{direction_emoji} {ticker} {direction.upper()}**")
+            st.markdown(f"**{direction_emoji} {_esc(str(ticker))} {_esc(str(direction.upper()))}**")
             st.markdown(
                 f"Entry: `${entry_price:.2f}` | Current: `${current_price:.2f}` | "
                 f"Position: `${position_value:,.2f}` | "
                 f"P&L: <span style=\"color:{pnl_color}\">${pnl:+,.2f} ({pnl_pct:+.2f}%)</span> | "
                 f"Stop: `${stop_loss:.2f}` | Target: `${take_profit:.2f}` | "
-                f"Grade: `{grade}` | Accuracy: `{accuracy:.0f}%`",
+                f"Grade: `{_esc(str(grade))}` | Accuracy: `{accuracy:.0f}%`",
                 unsafe_allow_html=True,
             )
             st.markdown("---")

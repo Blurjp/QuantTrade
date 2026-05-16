@@ -36,6 +36,8 @@ last_run_status = "never"
 pipeline_runs = 0
 OUTPUT_BASE = "outputs"
 pipeline_lock = threading.Lock()
+state_lock = threading.Lock()
+shutdown_event = threading.Event()
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -55,13 +57,45 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         global last_run_time, last_run_status, pipeline_runs
 
         if self.path == "/health" or self.path == "/":
+            import resource
+            try:
+                with open("/proc/self/status") as f:
+                    proc_status = dict(
+                        line.split(":", 1)
+                        for line in f.read().strip().split("\n")
+                        if ":" in line
+                    )
+            except Exception:
+                proc_status = {}
+            try:
+                with open("/proc/meminfo") as f:
+                    meminfo = dict(
+                        line.split(":", 1)
+                        for line in f.read().strip().split("\n")
+                        if ":" in line
+                    )
+            except Exception:
+                meminfo = {}
+            with state_lock:
+                snap_run_time = last_run_time
+                snap_status = last_run_status
+                snap_runs = pipeline_runs
             response = {
                 "status": "healthy",
                 "service": "quanttrade-scheduler",
-                "last_run": last_run_time,
-                "last_status": last_run_status,
-                "total_runs": pipeline_runs,
+                "last_run": snap_run_time,
+                "last_status": snap_status,
+                "total_runs": snap_runs,
                 "interval_minutes": int(os.environ.get("PIPELINE_INTERVAL_MINUTES", "60")),
+                "memory": {
+                    "rss_mb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1) if sys.platform != "darwin" else round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024, 1),
+                    "vm_rss_kb": proc_status.get("VmRSS", "?").strip(),
+                    "vm_size_kb": proc_status.get("VmSize", "?").strip(),
+                    "vm_peak_kb": proc_status.get("VmPeak", "?").strip(),
+                    "mem_available": meminfo.get("MemAvailable", "?").strip(),
+                    "mem_total": meminfo.get("MemTotal", "?").strip(),
+                    "cached": meminfo.get("Cached", "?").strip(),
+                },
             }
             self._send_json(response)
 
@@ -1136,21 +1170,39 @@ def run_daily_pipeline():
 
     if not pipeline_lock.acquire(blocking=False):
         logger.warning("Pipeline already running, skipping overlapping cycle")
-        last_run_status = "skipped: already running"
+        with state_lock:
+            last_run_status = "skipped: already running"
         return
 
     try:
         import multiprocessing as mp
 
         timeout_seconds = int(os.environ.get("PIPELINE_TIMEOUT_SECONDS", "900"))
-        last_run_time = datetime.now().isoformat()
-        last_run_status = "running"
+        with state_lock:
+            last_run_time = datetime.now().isoformat()
+            last_run_status = "running"
 
         queue = mp.Queue()
         proc = mp.Process(target=_run_daily_pipeline_child, args=(queue,), daemon=False)
         proc.start()
         logger.info("Pipeline child started: pid=%s timeout=%ss", proc.pid, timeout_seconds)
-        proc.join(timeout_seconds)
+
+        # Wait for child, checking shutdown_event every 5s
+        elapsed = 0
+        while proc.is_alive() and elapsed < timeout_seconds:
+            if shutdown_event.is_set():
+                logger.info("Shutdown requested, terminating pipeline child pid=%s", proc.pid)
+                proc.terminate()
+                proc.join(10)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(5)
+                with state_lock:
+                    last_run_status = "stopped: shutdown"
+                return
+            wait = min(5, timeout_seconds - elapsed)
+            proc.join(wait)
+            elapsed += wait
 
         if proc.is_alive():
             logger.error("Pipeline child timed out after %ss, terminating pid=%s", timeout_seconds, proc.pid)
@@ -1160,11 +1212,13 @@ def run_daily_pipeline():
                 logger.error("Pipeline child did not terminate cleanly, killing pid=%s", proc.pid)
                 proc.kill()
                 proc.join(10)
-            last_run_status = "failed: timeout"
+            with state_lock:
+                last_run_status = "failed: timeout"
             return
 
         if proc.exitcode != 0:
-            last_run_status = f"failed: child exit {proc.exitcode}"
+            with state_lock:
+                last_run_status = f"failed: child exit {proc.exitcode}"
             logger.error("Pipeline child exited with code %s", proc.exitcode)
             return
 
@@ -1173,11 +1227,13 @@ def run_daily_pipeline():
         except Exception:
             status, message = "success", None
         if status == "success":
-            pipeline_runs += 1
-            last_run_status = "success"
+            with state_lock:
+                pipeline_runs += 1
+                last_run_status = "success"
             logger.info("Pipeline child completed successfully")
         else:
-            last_run_status = f"failed: {message or 'unknown'}"
+            with state_lock:
+                last_run_status = f"failed: {message or 'unknown'}"
             logger.error("Pipeline child failed: %s", message)
     finally:
         pipeline_lock.release()
@@ -1269,6 +1325,16 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
 def main():
     global last_run_status
 
+    import signal as _signal
+
+    def _handle_shutdown(signum, frame):
+        sig_name = _signal.Signals(signum).name
+        logger.info("Received %s, shutting down gracefully...", sig_name)
+        shutdown_event.set()
+
+    _signal.signal(_signal.SIGTERM, _handle_shutdown)
+    _signal.signal(_signal.SIGINT, _handle_shutdown)
+
     refresh_interval = int(os.environ.get("PIPELINE_INTERVAL_MINUTES", "60"))
     port = int(os.environ.get("PORT", "8080"))
 
@@ -1281,10 +1347,11 @@ def main():
 
     # Start health check server for Railway FIRST
     # This ensures the health endpoint responds immediately
-    start_health_server(port)
+    server = start_health_server(port)
 
     # Mark as ready for health checks
-    last_run_status = "initialized"
+    with state_lock:
+        last_run_status = "initialized"
 
     def delayed_start():
         time.sleep(5)  # Give health server time to start
@@ -1323,9 +1390,13 @@ def main():
     schedule.every(30).minutes.do(run_reconciler)
     logger.info("Order reconciler: every 30 minutes")
 
-    while True:
+    while not shutdown_event.is_set():
         schedule.run_pending()
-        time.sleep(30)
+        shutdown_event.wait(30)
+
+    logger.info("Shutting down health server...")
+    server.shutdown()
+    logger.info("Scheduler stopped.")
 
 
 if __name__ == "__main__":

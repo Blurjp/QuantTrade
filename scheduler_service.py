@@ -617,6 +617,39 @@ def run_satellite_monitors(target_date: str, output_base: str = "outputs"):
     return all_signals
 
 
+def send_discord_report(content: str) -> bool:
+    """Send a report to Discord via webhook."""
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        logger.debug("No DISCORD_WEBHOOK_URL, skipping Discord report")
+        return False
+
+    try:
+        import requests
+        response = requests.post(webhook_url, json={"content": content})
+        response.raise_for_status()
+        logger.info("Discord report sent")
+        return True
+    except Exception as e:
+        logger.error("Discord report failed: %s", e)
+        return False
+
+
+def load_top_signals(output_dir: Path, limit: int = 5) -> list:
+    """Load top actionable signals from output directory."""
+    signals = []
+    for signal_file in sorted(output_dir.rglob("signal_*.json"), reverse=True):
+        try:
+            sig = json.loads(signal_file.read_text())
+            if sig.get("confidence", 0) >= 70:
+                signals.append(sig)
+                if len(signals) >= limit:
+                    break
+        except Exception:
+            continue
+    return signals
+
+
 def check_stop_loss_take_profit(portfolio, prices, signal_tracker=None):
     """
     Check all open positions against current prices.
@@ -1322,6 +1355,78 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
     return created_count > 0
 
 
+def run_paper_trading_cycle():
+    """Full paper trading cycle: risk check, auto-trade, reconcile, Discord report.
+    Only runs during US market hours (9:30am-4pm ET, Mon-Fri).
+    """
+    # Market hours check: 9:30 AM - 4:00 PM ET, Monday-Friday
+    now = datetime.now()
+    if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        logger.debug("Skipping paper trading cycle: weekend")
+        return
+    hour = now.hour
+    if hour < 9 or hour >= 16:
+        logger.debug("Skipping paper trading cycle: outside market hours")
+        return
+
+    output_dir = Path("outputs")
+
+    # Load portfolio and prices once (reused across cycle)
+    from paper_trading.multi_asset_portfolio import MultiAssetPortfolio
+    from pipeline.price_feed import get_prices_for_portfolio
+
+    portfolio = MultiAssetPortfolio()
+    prices = get_prices_for_portfolio(portfolio)
+
+    # 1. Check stop-loss/take-profit
+    try:
+        check_stop_loss_take_profit(portfolio, prices)
+    except Exception as e:
+        logger.error("Stop-loss check failed: %s", e)
+
+    # 2. Run heavy pipeline only if data is stale or missing
+    today_summary = output_dir / now.strftime("%Y-%m-%d") / "daily_summary.json"
+    should_run_pipeline = True
+    if today_summary.exists():
+        age = now.timestamp() - today_summary.stat().st_mtime
+        should_run_pipeline = age > 7200  # 2 hours
+
+    if should_run_pipeline:
+        logger.info("Running satellite pipeline (data stale or missing)")
+        run_daily_pipeline()
+
+    # 3. Reconcile orders + sync portfolio from Alpaca
+    try:
+        from execution.service import ExecutionService
+        from execution.reconciler import Reconciler
+
+        svc = ExecutionService()
+        reconciler = Reconciler(svc)
+        report = reconciler.run()
+        if report.has_alert:
+            logger.warning("Reconciler alerts: %s", report.summary())
+
+        synced, sync_warnings = portfolio.sync_from_alpaca()
+        if synced or sync_warnings:
+            logger.info("Portfolio sync: %d closed, %d warnings", synced, len(sync_warnings))
+            for w in sync_warnings:
+                logger.warning("Portfolio sync: %s", w)
+    except Exception as e:
+        logger.error("Reconcile/sync failed: %s", e)
+
+    # 4. Send Discord report
+    try:
+        from paper_trading.daily_multi_report import format_discord_report
+
+        recent_trades = portfolio.trades[-5:] if len(portfolio.trades) > 5 else portfolio.trades
+        top_signals = load_top_signals(output_dir, limit=5)
+
+        report = format_discord_report(portfolio, prices, top_signals, recent_trades)
+        send_discord_report(report)
+    except Exception as e:
+        logger.error("Discord report failed: %s", e)
+
+
 def main():
     global last_run_status
 
@@ -1335,14 +1440,12 @@ def main():
     _signal.signal(_signal.SIGTERM, _handle_shutdown)
     _signal.signal(_signal.SIGINT, _handle_shutdown)
 
-    refresh_interval = int(os.environ.get("PIPELINE_INTERVAL_MINUTES", "60"))
     port = int(os.environ.get("PORT", "8080"))
 
     logger.info("=" * 60)
     logger.info("QuantTrade Scheduler Started")
-    logger.info(f"Refresh interval: every {refresh_interval} minutes")
     logger.info(f"Health check port: {port}")
-    logger.info(f"Real satellite data: auto-detected")
+    logger.info(f"Paper trading cycle: every 15 minutes (market hours)")
     logger.info("=" * 60)
 
     # Start health check server for Railway FIRST
@@ -1360,35 +1463,9 @@ def main():
     initial_thread = threading.Thread(target=delayed_start, daemon=True)
     initial_thread.start()
 
-    # Schedule recurring runs
-    schedule.every(refresh_interval).minutes.do(run_daily_pipeline)
-
-    # Schedule stop-loss check every 5 minutes during market hours
-    def run_stop_loss_check():
-        try:
-            from cron_stop_loss import check_stop_loss
-            check_stop_loss()
-        except Exception as e:
-            logger.error("Stop-loss check failed: %s", e)
-
-    # Run stop-loss check every 5 minutes (9:30 AM - 4:00 PM ET, Mon-Fri)
-    schedule.every(5).minutes.do(run_stop_loss_check)
-    logger.info("Stop-loss monitor: every 5 minutes during market hours")
-
-    def run_reconciler():
-        try:
-            from execution.service import ExecutionService
-            from execution.reconciler import Reconciler
-            svc = ExecutionService()
-            reconciler = Reconciler(svc)
-            report = reconciler.run()
-            if report.has_alert:
-                logger.warning("Reconciler alerts: %s", report.summary())
-        except Exception as e:
-            logger.error("Reconciler run failed: %s", e)
-
-    schedule.every(30).minutes.do(run_reconciler)
-    logger.info("Order reconciler: every 30 minutes")
+    # Single consolidated paper trading cycle every 15 minutes
+    schedule.every(15).minutes.do(run_paper_trading_cycle)
+    logger.info("Paper trading cycle: every 15 minutes")
 
     while not shutdown_event.is_set():
         schedule.run_pending()

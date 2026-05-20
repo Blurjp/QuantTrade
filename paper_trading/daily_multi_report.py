@@ -136,11 +136,12 @@ def generate_multi_asset_report(
 def format_discord_report(
     portfolio: MultiAssetPortfolio,
     prices: Dict[str, float],
-    signals: dict = None,
+    signals: list = None,
+    trades: list = None,
 ) -> str:
     """Format report for Discord."""
     summary = portfolio.get_summary(prices)
-    
+
     lines = [
         f"**📊 QuantTrade Portfolio - {date.today().isoformat()}**",
         f"",
@@ -149,7 +150,7 @@ def format_discord_report(
         f"Cash: ${summary['cash']:,.2f}",
         f"",
     ]
-    
+
     if portfolio.positions:
         lines.append("**Positions**")
         for ticker, pos in portfolio.positions.items():
@@ -158,13 +159,22 @@ def format_discord_report(
             direction = "L" if pos.direction == "long" else "S"
             lines.append(f"{ticker} [{direction}]: ${current_price:.2f} ({format_pct(pnl_pct)})")
         lines.append("")
-    
+
+    if trades:
+        lines.append("**Recent Trades**")
+        for t in trades:
+            lines.append(f"{t.date} {t.action} {t.ticker} @ ${t.price:.2f} P&L=${t.pnl:+.2f}")
+        lines.append("")
+
     if signals:
-        lines.append("**Signals**")
-        for region, signal in signals.items():
-            icon = "✅" if signal.get('actionability') == 'Actionable' else "⏸️"
-            lines.append(f"{icon} {region}: {signal['signal'][:20]}")
-    
+        lines.append("**Top Signals**")
+        for s in signals:
+            region = s.get('region_id', 'N/A')
+            sig_text = s.get('signal', 'N/A')[:30]
+            conf = s.get('confidence', 0)
+            lines.append(f"{region}: {sig_text} ({conf}%)")
+        lines.append("")
+
     return "\n".join(lines)
 
 

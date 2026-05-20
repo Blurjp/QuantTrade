@@ -33,6 +33,7 @@ class Position:
     signal_accuracy: float = 0
     signal_grade: str = ""
     region_id: str = ""
+    current_price: Optional[float] = None
 
 
 @dataclass
@@ -129,8 +130,7 @@ class MultiAssetPortfolio:
             
             # Load positions
             for ticker, pos_data in state.get("positions", {}).items():
-                pos_copy = {k: v for k, v in pos_data.items() if k != 'current_price'}
-                self.positions[ticker] = Position(**pos_copy)
+                self.positions[ticker] = Position(**pos_data)
             
             # Load trades
             self.trades = [Trade(**t) for t in state.get("trades", [])]
@@ -431,8 +431,73 @@ class MultiAssetPortfolio:
         
         self.daily_snapshots.append(snapshot)
         self._save_state()
-        
+
         return snapshot
+
+    def sync_from_alpaca(self) -> tuple[int, List[str]]:
+        """Reconcile local positions against Alpaca. Alpaca is truth.
+
+        Returns (closed_count, warnings) where closed_count is the number of
+        local positions closed because they no longer exist in Alpaca.
+        """
+        from execution.brokers.alpaca import AlpacaBrokerClient
+
+        warnings: List[str] = []
+        closed = 0
+
+        broker = AlpacaBrokerClient(paper=True)
+
+        try:
+            alpaca_positions = {p.symbol: p for p in broker.get_positions()}
+        except Exception as e:
+            logger.error("sync_from_alpaca: failed to fetch Alpaca positions: %s", e)
+            return 0, [f"fetch_failed: {e}"]
+
+        with self._lock:
+            # Close local positions that Alpaca no longer holds
+            for ticker in list(self.positions.keys()):
+                if ticker not in alpaca_positions:
+                    pos = self.positions[ticker]
+                    close_price = getattr(pos, 'current_price', None) or pos.entry_price
+                    reason = "sync: closed — not found in Alpaca"
+                    trade = self._close_position_unlocked(ticker, close_price, reason)
+                    if trade:
+                        closed += 1
+                        logger.info(
+                            "sync_from_alpaca: closed %s (%s) @ $%.2f P&L=$%.2f",
+                            ticker, reason, close_price, trade.pnl,
+                        )
+
+            # Check Alpaca-only positions (local can't reconstruct metadata)
+            for symbol, bp in alpaca_positions.items():
+                if symbol not in self.positions:
+                    msg = (
+                        f"Alpaca holds {symbol} ({bp.side} {bp.qty} @ ${bp.avg_entry_price:.2f}) "
+                        f"but local portfolio has no record — skipped"
+                    )
+                    warnings.append(msg)
+                    logger.warning("sync_from_alpaca: %s", msg)
+
+            # Update current_price and check for quantity/side mismatches
+            for ticker, pos in self.positions.items():
+                if ticker not in alpaca_positions:
+                    continue
+                bp = alpaca_positions[ticker]
+                pos.current_price = bp.current_price
+                pos.unrealized_pnl = bp.unrealized_pnl
+                if pos.direction != bp.side:
+                    msg = f"{ticker}: direction mismatch local={pos.direction} alpaca={bp.side}"
+                    warnings.append(msg)
+                    logger.warning("sync_from_alpaca: %s", msg)
+                if abs(pos.quantity - bp.qty) > 0.01:
+                    msg = f"{ticker}: quantity mismatch local={pos.quantity:.4f} alpaca={bp.qty:.4f}"
+                    warnings.append(msg)
+                    logger.warning("sync_from_alpaca: %s", msg)
+
+            if closed > 0:
+                self._save_state()
+
+        return closed, warnings
 
 
 if __name__ == "__main__":

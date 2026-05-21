@@ -1360,13 +1360,13 @@ def run_paper_trading_cycle():
     Only runs during US market hours (9:30am-4pm ET, Mon-Fri).
     """
     # Market hours check: 9:30 AM - 4:00 PM ET, Monday-Friday
-    now = datetime.now()
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("America/New_York"))
     if now.weekday() >= 5:  # Saturday=5, Sunday=6
         logger.debug("Skipping paper trading cycle: weekend")
         return
-    hour = now.hour
-    if hour < 9 or hour >= 16:
-        logger.debug("Skipping paper trading cycle: outside market hours")
+    if now.hour < 9 or (now.hour == 9 and now.minute < 30) or now.hour >= 16:
+        logger.debug("Skipping paper trading cycle: outside market hours (ET)")
         return
 
     output_dir = Path("outputs")

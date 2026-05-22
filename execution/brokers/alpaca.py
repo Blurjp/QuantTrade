@@ -10,8 +10,10 @@ Environment variables:
 - ALPACA_SECRET_KEY: Required. Secret key from Alpaca dashboard.
 - ALPACA_PAPER:      Optional. "true" (default) uses paper trading API.
 
-Safety: this adapter is only instantiated when EXECUTION_MODE=live
-AND LIVE_TRADING_ENABLED=true AND BROKER=alpaca. All three must be set.
+Safety: when EXECUTION_MODE=paper and BROKER=alpaca, this adapter is
+instantiated with paper=True (connecting to paper-api.alpaca.markets).
+When EXECUTION_MODE=live AND LIVE_TRADING_ENABLED=true AND BROKER=alpaca,
+this adapter connects to the live API.
 """
 
 import logging

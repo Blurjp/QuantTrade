@@ -9,9 +9,11 @@ MultiAssetPortfolio.open_position() directly. This service:
 4. Updates the ledger with the result.
 5. Returns the OrderResult to the caller.
 
-CRITICAL routing rule: when EXECUTION_MODE is 'shadow' or 'paper',
-the BROKER env var is ignored and ShadowBrokerClient is always used.
-This prevents accidental live order submission.
+CRITICAL routing rule: when EXECUTION_MODE is 'shadow', the BROKER
+env var is ignored and ShadowBrokerClient is always used.
+When EXECUTION_MODE is 'paper', BROKER=alpaca routes to
+AlpacaBrokerClient(paper=True) for paper trading via Alpaca's
+paper API. This prevents accidental live (real-money) order submission.
 
 Live mode requires TWO switches: EXECUTION_MODE=live AND
 LIVE_TRADING_ENABLED=true. A misconfigured live mode (missing broker,

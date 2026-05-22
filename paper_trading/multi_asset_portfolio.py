@@ -6,6 +6,7 @@ Supports trading across multiple asset classes based on satellite signals.
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, date
 from pathlib import Path
@@ -121,7 +122,20 @@ class MultiAssetPortfolio:
         }
         
         self._load_state()
-    
+
+        # Auto-sync from Alpaca when running in paper mode so Alpaca is
+        # always the source of truth on startup.
+        if os.getenv("EXECUTION_MODE") == "paper" and os.getenv("BROKER") == "alpaca":
+            try:
+                closed, sync_warnings = self.sync_from_alpaca()
+                if closed or sync_warnings:
+                    logger.info(
+                        "Init sync from Alpaca: %d positions closed, %d warnings",
+                        closed, len(sync_warnings),
+                    )
+            except Exception as e:
+                logger.warning("Init sync from Alpaca failed (continuing with local state): %s", e)
+
     def _load_state(self):
         """Load portfolio state from file."""
         if self.state_file.exists():
@@ -435,8 +449,9 @@ class MultiAssetPortfolio:
         return snapshot
 
     def sync_from_alpaca(self) -> tuple[int, List[str]]:
-        """Reconcile local positions against Alpaca. Alpaca is truth.
+        """Reconcile local state against Alpaca. Alpaca is truth.
 
+        Syncs cash from Alpaca account and reconciles positions.
         Returns (closed_count, warnings) where closed_count is the number of
         local positions closed because they no longer exist in Alpaca.
         """
@@ -452,6 +467,25 @@ class MultiAssetPortfolio:
         except Exception as e:
             logger.error("sync_from_alpaca: failed to fetch Alpaca positions: %s", e)
             return 0, [f"fetch_failed: {e}"]
+
+        # Sync cash from Alpaca account
+        try:
+            account = broker.get_account()
+            if account and not account.account_blocked:
+                alpaca_cash = account.cash
+                if abs(self.cash - alpaca_cash) > 0.01:
+                    logger.info(
+                        "sync_from_alpaca: cash updated $%.2f → $%.2f",
+                        self.cash, alpaca_cash,
+                    )
+                    self.cash = alpaca_cash
+                    # Also update initial_capital to match Alpaca equity for
+                    # correct percentage-based risk limits
+                    if account.equity > 0:
+                        self.initial_capital = account.equity
+        except Exception as e:
+            logger.warning("sync_from_alpaca: failed to sync cash from Alpaca: %s", e)
+            warnings.append(f"cash_sync_failed: {e}")
 
         with self._lock:
             # Close local positions that Alpaca no longer holds
@@ -494,8 +528,7 @@ class MultiAssetPortfolio:
                     warnings.append(msg)
                     logger.warning("sync_from_alpaca: %s", msg)
 
-            if closed > 0:
-                self._save_state()
+            self._save_state()
 
         return closed, warnings
 

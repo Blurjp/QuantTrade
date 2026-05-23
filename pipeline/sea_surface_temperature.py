@@ -320,8 +320,9 @@ class SeaSurfaceTemperatureMonitor:
         sst_anomaly = "significant" if abs(sst_z) > threshold_std else \
                      "moderate" if abs(sst_z) > 1.5 else "none"
         
-        # Combined score
-        combined_z = (abs(sst_z) + abs(anomaly_z)) / 2
+        # Combined score — use SIGNED z-scores for direction
+        combined_z_signed = (sst_z + anomaly_z) / 2
+        combined_z_magnitude = (abs(sst_z) + abs(anomaly_z)) / 2
         
         return {
             "sst_z_score": round(sst_z, 2),
@@ -330,9 +331,10 @@ class SeaSurfaceTemperatureMonitor:
                                        baseline["sst"]["mean"]) / 
                                        baseline["sst"]["mean"] * 100, 2),
             "anomaly_z_score": round(anomaly_z, 2),
-            "combined_z_score": round(combined_z, 2),
-            "overall_anomaly": "significant" if combined_z > 2.0 else \
-                              "moderate" if combined_z > 1.5 else "none"
+            "combined_z_score": round(combined_z_signed, 2),
+            "combined_z_magnitude": round(combined_z_magnitude, 2),
+            "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
+                              "moderate" if combined_z_magnitude > 1.5 else "none"
         }
     
     def generate_signal(
@@ -467,7 +469,7 @@ class SeaSurfaceTemperatureMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 10)
+                confidence = min(100, 60 + abs(combined_z) * 10)
                 rationale = f"SST significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"
@@ -487,7 +489,7 @@ class SeaSurfaceTemperatureMonitor:
             "signal_type": "sea_surface_temperature",
             "direction": direction,
             "trade_direction": "neutral",  # SST is context only - trade direction from NDVI/precipitation
-            "confidence": min(confidence, 55),  # Cap SST confidence to avoid overriding direct ag signals
+            "confidence": confidence,  # SST confidence no longer capped — preserves dynamic range
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_sst": current_data["sst_celsius"],

@@ -28,6 +28,36 @@ CONFIDENCE_WEIGHTS = {
 DEFAULT_CONFIRMATIONS = 2
 
 
+def _normalize_confidence(confidence) -> str:
+    """Convert any confidence format to a standard label (High/Medium/Low).
+    
+    Handles:
+    - String labels: "High", "Medium", "Low" → pass through
+    - Numeric 0-100: ≥70 → "High", ≥40 → "Medium", <40 → "Low"
+    - Numeric 0-1: ≥0.7 → "High", ≥0.4 → "Medium", <0.4 → "Low"
+    """
+    if isinstance(confidence, str):
+        return confidence if confidence in CONFIDENCE_WEIGHTS else "Low"
+    if isinstance(confidence, (int, float)):
+        # Auto-detect 0-1 vs 0-100 scale
+        if confidence <= 1.0:
+            if confidence >= 0.7:
+                return "High"
+            elif confidence >= 0.4:
+                return "Medium"
+            else:
+                return "Low"
+        else:
+            # 0-100 scale
+            if confidence >= 70:
+                return "High"
+            elif confidence >= 40:
+                return "Medium"
+            else:
+                return "Low"
+    return "Low"
+
+
 def _meta_signal_text(group_config: Dict, direction: str) -> str:
     label = group_config.get("label", "Meta signal")
     if direction == "LONG":
@@ -68,7 +98,8 @@ def save_persistence_state(output_base: str, state: Dict) -> None:
 def _signal_vote(signal: Dict) -> float:
     action = signal.get("trading_action", "FLAT")
     direction = 1.0 if action == "LONG" else -1.0 if action == "SHORT" else 0.0
-    confidence = CONFIDENCE_WEIGHTS.get(signal.get("confidence", "Low"), 0.25)
+    confidence_label = _normalize_confidence(signal.get("confidence", "Low"))
+    confidence = CONFIDENCE_WEIGHTS.get(confidence_label, 0.25)
     return direction * confidence
 
 
@@ -139,7 +170,7 @@ def build_meta_signals(signals: Dict, region_configs: Dict, meta_groups: Dict, p
                 "region": region_id,
                 "weight": weight,
                 "action": signal.get("trading_action", "FLAT"),
-                "confidence": signal.get("confidence", "Low"),
+                "confidence": _normalize_confidence(signal.get("confidence", "Low")),
                 "signal": signal.get("signal", "No data"),
             })
 

@@ -352,8 +352,10 @@ class ThermalInfraredMonitor:
         coverage_anomaly = "significant" if abs(coverage_z_score) > coverage_threshold_std else \
                           "moderate" if abs(coverage_z_score) > 1.0 else "none"
         
-        # Combined anomaly score
-        combined_z = (abs(temp_z_score) + abs(coverage_z_score)) / 2
+        # Combined anomaly score — use SIGNED z-scores for direction,
+        # absolute values only for magnitude/anomaly labels
+        combined_z_signed = (temp_z_score + coverage_z_score) / 2
+        combined_z_magnitude = (abs(temp_z_score) + abs(coverage_z_score)) / 2
         
         return {
             "temp_z_score": round(temp_z_score, 2),
@@ -362,9 +364,10 @@ class ThermalInfraredMonitor:
             "coverage_z_score": round(coverage_z_score, 2),
             "coverage_anomaly": coverage_anomaly,
             "coverage_deviation_pct": round((current_coverage - coverage_mean) / coverage_mean * 100, 2),
-            "combined_z_score": round(combined_z, 2),
-            "overall_anomaly": "significant" if combined_z > 2.0 else \
-                              "moderate" if combined_z > 1.5 else "none"
+            "combined_z_score": round(combined_z_signed, 2),
+            "combined_z_magnitude": round(combined_z_magnitude, 2),
+            "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
+                              "moderate" if combined_z_magnitude > 1.5 else "none"
         }
     
     def generate_signal(
@@ -427,7 +430,7 @@ class ThermalInfraredMonitor:
             # Higher temperature = more production = positive signal
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 10)
+                confidence = min(100, 60 + abs(combined_z) * 10)
                 rationale = f"Temperature {anomaly['temp_deviation_pct']:+.1f}% above baseline. Production activity significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
@@ -443,7 +446,7 @@ class ThermalInfraredMonitor:
             # But also watch for overheating
             if combined_z > 2.5:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 8)
+                confidence = min(100, 60 + abs(combined_z) * 8)
                 rationale = f"Data center heat output {anomaly['temp_deviation_pct']:+.1f}% above baseline. Computing demand significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
@@ -458,7 +461,7 @@ class ThermalInfraredMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 10)
+                confidence = min(100, 60 + abs(combined_z) * 10)
                 rationale = f"Activity significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"

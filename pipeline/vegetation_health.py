@@ -576,8 +576,9 @@ class VegetationHealthMonitor:
         ndvi_anomaly = "significant" if abs(ndvi_z) > threshold_std else \
                       "moderate" if abs(ndvi_z) > 1.5 else "none"
         
-        # Combined score
-        combined_z = (abs(ndvi_z) + abs(evi_z)) / 2
+        # Combined score — use SIGNED z-scores for direction
+        combined_z_signed = (ndvi_z + evi_z) / 2
+        combined_z_magnitude = (abs(ndvi_z) + abs(evi_z)) / 2
         
         return {
             "ndvi_z_score": round(ndvi_z, 2),
@@ -586,9 +587,10 @@ class VegetationHealthMonitor:
                                         baseline["ndvi"]["mean"]) / 
                                         baseline["ndvi"]["mean"] * 100, 2),
             "evi_z_score": round(evi_z, 2),
-            "combined_z_score": round(combined_z, 2),
-            "overall_anomaly": "significant" if combined_z > 2.0 else \
-                              "moderate" if combined_z > 1.5 else "none"
+            "combined_z_score": round(combined_z_signed, 2),
+            "combined_z_magnitude": round(combined_z_magnitude, 2),
+            "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
+                              "moderate" if combined_z_magnitude > 1.5 else "none"
         }
     
     def generate_signal(
@@ -699,7 +701,7 @@ class VegetationHealthMonitor:
             # Default logic
             if anomaly["combined_z_score"] > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + anomaly["combined_z_score"] * 10)
+                confidence = min(100, 60 + abs(anomaly["combined_z_score"]) * 10)
                 rationale = f"Vegetation health significantly above baseline."
             elif anomaly["combined_z_score"] < -2.0:
                 direction = "short"

@@ -581,7 +581,10 @@ class AtmosphericMonitor:
         
         # Combined anomaly score (weighted by gas importance for industrial activity)
         # NO2 is most indicative of industrial activity
-        combined_z = (abs(no2_z) * 0.4 + abs(so2_z) * 0.3 +
+        # Use SIGNED z-scores for direction, absolute only for anomaly labels
+        combined_z_signed = (no2_z * 0.4 + so2_z * 0.3 +
+                     co2_z * 0.2 + ch4_z * 0.1)
+        combined_z_magnitude = (abs(no2_z) * 0.4 + abs(so2_z) * 0.3 +
                      abs(co2_z) * 0.2 + abs(ch4_z) * 0.1)
 
         # Helper for safe deviation percentage calculation
@@ -615,9 +618,10 @@ class AtmosphericMonitor:
                 current_data.get("ch4_concentration"),
                 baseline.get("ch4", {}).get("mean")
             ), 2),
-            "combined_z_score": round(combined_z, 2),
-            "overall_anomaly": "significant" if combined_z > 2.0 else \
-                              "moderate" if combined_z > 1.5 else "none"
+            "combined_z_score": round(combined_z_signed, 2),
+            "combined_z_magnitude": round(combined_z_magnitude, 2),
+            "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
+                              "moderate" if combined_z_magnitude > 1.5 else "none"
         }
     
     def generate_signal(
@@ -669,7 +673,7 @@ class AtmosphericMonitor:
         
         if combined_z > 2.0:
             direction = "long"
-            confidence = min(100, 60 + combined_z * 10)
+            confidence = min(100, 60 + abs(combined_z) * 10)
             rationale = f"Industrial emissions {anomaly['no2_deviation_pct']:+.1f}% above baseline. Production activity significantly increased."
         elif combined_z < -2.0:
             direction = "short"

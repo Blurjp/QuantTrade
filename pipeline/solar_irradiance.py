@@ -331,8 +331,9 @@ class SolarIrradianceMonitor:
         gen_anomaly = "significant" if abs(gen_z) > threshold_std else \
                      "moderate" if abs(gen_z) > 1.5 else "none"
         
-        # Combined score
-        combined_z = (abs(irr_z) + abs(cloud_z) + abs(gen_z)) / 3
+        # Combined score — use SIGNED z-scores for direction
+        combined_z_signed = (irr_z + cloud_z + gen_z) / 3
+        combined_z_magnitude = (abs(irr_z) + abs(cloud_z) + abs(gen_z)) / 3
         
         return {
             "irradiance_z_score": round(irr_z, 2),
@@ -350,9 +351,10 @@ class SolarIrradianceMonitor:
             "generation_deviation_pct": round((current_data["estimated_generation_gwh"] - 
                                               baseline["generation"]["mean"]) / 
                                               baseline["generation"]["mean"] * 100, 2),
-            "combined_z_score": round(combined_z, 2),
-            "overall_anomaly": "significant" if combined_z > 2.0 else \
-                              "moderate" if combined_z > 1.5 else "none"
+            "combined_z_score": round(combined_z_signed, 2),
+            "combined_z_magnitude": round(combined_z_magnitude, 2),
+            "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
+                              "moderate" if combined_z_magnitude > 1.5 else "none"
         }
     
     def generate_signal(
@@ -402,7 +404,7 @@ class SolarIrradianceMonitor:
             # High irradiance = high solar generation = LONG solar stocks
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 10)
+                confidence = min(100, 60 + abs(combined_z) * 10)
                 rationale = f"Solar irradiance {anomaly['irradiance_deviation_pct']:+.1f}% above baseline. Solar generation significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
@@ -434,7 +436,7 @@ class SolarIrradianceMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + combined_z * 10)
+                confidence = min(100, 60 + abs(combined_z) * 10)
                 rationale = f"Irradiance significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"

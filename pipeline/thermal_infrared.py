@@ -24,6 +24,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
+
 def _load_cattle_feedlot_facilities() -> Dict:
     from pipeline.regions import get_regions_by_type
     out = {}
@@ -430,11 +433,11 @@ class ThermalInfraredMonitor:
             # Higher temperature = more production = positive signal
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Temperature {anomaly['temp_deviation_pct']:+.1f}% above baseline. Production activity significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Temperature {anomaly['temp_deviation_pct']:+.1f}% below baseline. Production activity significantly decreased."
             else:
                 direction = "neutral"
@@ -446,11 +449,11 @@ class ThermalInfraredMonitor:
             # But also watch for overheating
             if combined_z > 2.5:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 8)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Data center heat output {anomaly['temp_deviation_pct']:+.1f}% above baseline. Computing demand significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Data center heat output {anomaly['temp_deviation_pct']:+.1f}% below baseline. Computing demand decreased."
             else:
                 direction = "neutral"
@@ -461,11 +464,11 @@ class ThermalInfraredMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Activity significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Activity significantly below baseline."
             else:
                 direction = "neutral"
@@ -481,6 +484,7 @@ class ThermalInfraredMonitor:
             "signal_type": "thermal_infrared",
             "direction": direction,
             "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": facility["instruments"],
             "current_temp": current_data["mean_temperature"],

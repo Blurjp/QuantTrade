@@ -23,6 +23,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
+
 class SolarIrradianceMonitor:
     """Monitor solar irradiance for energy trading signals."""
     
@@ -338,19 +341,19 @@ class SolarIrradianceMonitor:
         return {
             "irradiance_z_score": round(irr_z, 2),
             "irradiance_anomaly": irr_anomaly,
-            "irradiance_deviation_pct": round((current_data["irradiance_kwh_m2_day"] - 
-                                              baseline["irradiance"]["mean"]) / 
-                                              baseline["irradiance"]["mean"] * 100, 2),
+            "irradiance_deviation_pct": round((current_data["irradiance_kwh_m2_day"] -
+                                              baseline["irradiance"]["mean"]) /
+                                              (baseline["irradiance"]["mean"] or 1e-10) * 100, 2),
             "cloud_z_score": round(cloud_z, 2),
             "cloud_anomaly": cloud_anomaly,
-            "cloud_deviation_pct": round((current_data["cloud_cover_pct"] - 
-                                         baseline["cloud_cover"]["mean"]) / 
-                                         baseline["cloud_cover"]["mean"] * 100, 2),
+            "cloud_deviation_pct": round((current_data["cloud_cover_pct"] -
+                                         baseline["cloud_cover"]["mean"]) /
+                                         (baseline["cloud_cover"]["mean"] or 1e-10) * 100, 2),
             "generation_z_score": round(gen_z, 2),
             "generation_anomaly": gen_anomaly,
-            "generation_deviation_pct": round((current_data["estimated_generation_gwh"] - 
-                                              baseline["generation"]["mean"]) / 
-                                              baseline["generation"]["mean"] * 100, 2),
+            "generation_deviation_pct": round((current_data["estimated_generation_gwh"] -
+                                              baseline["generation"]["mean"]) /
+                                              (baseline["generation"]["mean"] or 1e-10) * 100, 2),
             "combined_z_score": round(combined_z_signed, 2),
             "combined_z_magnitude": round(combined_z_magnitude, 2),
             "overall_anomaly": "significant" if combined_z_magnitude > 2.0 else \
@@ -404,11 +407,11 @@ class SolarIrradianceMonitor:
             # High irradiance = high solar generation = LONG solar stocks
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Solar irradiance {anomaly['irradiance_deviation_pct']:+.1f}% above baseline. Solar generation significantly increased."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Solar irradiance {anomaly['irradiance_deviation_pct']:+.1f}% below baseline. Solar generation significantly decreased."
             else:
                 direction = "neutral"
@@ -420,12 +423,12 @@ class SolarIrradianceMonitor:
             if anomaly["cloud_z_score"] > 2.0:
                 # Very cloudy → high gas demand → LONG gas
                 direction = "long"
-                confidence = min(100, 60 + abs(anomaly["cloud_z_score"]) * 10)
+                confidence = min(100, 50 + abs(anomaly["cloud_z_score"]) * 12)
                 rationale = f"Cloud cover {anomaly['cloud_deviation_pct']:+.1f}% above baseline. Natural gas power demand increased."
             elif anomaly["cloud_z_score"] < -2.0:
                 # Very sunny → low gas demand → SHORT gas
                 direction = "short"
-                confidence = min(100, 60 + abs(anomaly["cloud_z_score"]) * 10)
+                confidence = min(100, 50 + abs(anomaly["cloud_z_score"]) * 12)
                 rationale = f"Cloud cover {anomaly['cloud_deviation_pct']:+.1f}% below baseline. Natural gas power demand decreased."
             else:
                 direction = "neutral"
@@ -436,11 +439,11 @@ class SolarIrradianceMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Irradiance significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"Irradiance significantly below baseline."
             else:
                 direction = "neutral"
@@ -456,6 +459,7 @@ class SolarIrradianceMonitor:
             "signal_type": "solar_irradiance",
             "direction": direction,
             "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_irradiance": current_data["irradiance_kwh_m2_day"],

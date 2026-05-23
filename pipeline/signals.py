@@ -14,14 +14,7 @@ import pandas as pd
 from pipeline.regions import list_regions, resolve_region_output_base
 
 
-def _confidence_label(score: float) -> str:
-    if pd.isna(score):
-        return "Unknown"
-    if score >= 0.75:
-        return "High"
-    if score >= 0.55:
-        return "Medium"
-    return "Low"
+from pipeline.confidence_utils import confidence_label as _confidence_label
 
 
 def _actionability_for(signal: str, confidence: str) -> str:
@@ -478,7 +471,7 @@ def _generate_agriculture_signal(data: pd.DataFrame, **kwargs) -> dict:
     else:
         trading_action = "FLAT"
         signal = "Neutral crop conditions"
-        confidence = "Medium"
+        confidence = "Low"
 
     return {
         "trading_action": trading_action,
@@ -552,7 +545,7 @@ def _generate_auto_inventory_signal(data: pd.DataFrame, **kwargs) -> dict:
     else:
         trading_action = "FLAT"
         signal = "Neutral inventory levels"
-        confidence = "Medium"
+        confidence = "Low"
 
     return {
         "trading_action": trading_action,
@@ -617,7 +610,7 @@ def _generate_oil_storage_signal(data: pd.DataFrame, **kwargs) -> dict:
     else:
         trading_action = "FLAT"
         signal = "Neutral storage levels"
-        confidence = "Medium"
+        confidence = "Low"
 
     return {
         "trading_action": trading_action,
@@ -670,7 +663,7 @@ def _generate_chokepoint_signal(data: pd.DataFrame, **kwargs) -> dict:
     # Low throughput = supply disruption = LONG (prices up)
     # High throughput = good flow = neutral/SHORT
 
-    threshold = kwargs.get("threshold", 0.1)
+    threshold = kwargs.get("threshold", 0.5)
 
     if throughput_change < -threshold * baseline_mean:
         trading_action = "LONG"
@@ -683,7 +676,7 @@ def _generate_chokepoint_signal(data: pd.DataFrame, **kwargs) -> dict:
     else:
         trading_action = "FLAT"
         signal = "Normal throughput"
-        confidence = "Medium"
+        confidence = "Low"
 
     return {
         "trading_action": trading_action,

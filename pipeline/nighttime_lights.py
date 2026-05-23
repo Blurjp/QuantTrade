@@ -22,6 +22,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
+
 class NighttimeLightsMonitor:
     """Monitor economic activity using nighttime satellite imagery."""
     
@@ -344,11 +347,11 @@ class NighttimeLightsMonitor:
         
         if z_score > 2.0:
             direction = "long"
-            confidence = min(100, 60 + abs(z_score) * 10)
+            confidence = min(100, 50 + abs(z_score) * 12)
             rationale = f"Light intensity {anomaly['deviation_pct']:+.1f}% above baseline. Strong economic activity increase detected."
         elif z_score < -2.0:
             direction = "short"
-            confidence = min(100, 60 + abs(z_score) * 10)
+            confidence = min(100, 50 + abs(z_score) * 12)
             rationale = f"Light intensity {anomaly['deviation_pct']:+.1f}% below baseline. Economic activity slowdown detected."
         else:
             direction = "neutral"
@@ -363,6 +366,7 @@ class NighttimeLightsMonitor:
             "signal_type": "nighttime_lights",
             "direction": direction,
             "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_intensity": current_data["intensity"],

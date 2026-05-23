@@ -23,6 +23,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
+
 class SeaSurfaceTemperatureMonitor:
     """Monitor sea surface temperature for commodity trading signals."""
     
@@ -327,9 +330,9 @@ class SeaSurfaceTemperatureMonitor:
         return {
             "sst_z_score": round(sst_z, 2),
             "sst_anomaly": sst_anomaly,
-            "sst_deviation_pct": round((current_data["sst_celsius"] - 
-                                       baseline["sst"]["mean"]) / 
-                                       baseline["sst"]["mean"] * 100, 2),
+            "sst_deviation_pct": round((current_data["sst_celsius"] -
+                                       baseline["sst"]["mean"]) /
+                                       (baseline["sst"]["mean"] or 1e-10) * 100, 2),
             "anomaly_z_score": round(anomaly_z, 2),
             "combined_z_score": round(combined_z_signed, 2),
             "combined_z_magnitude": round(combined_z_magnitude, 2),
@@ -386,11 +389,11 @@ class SeaSurfaceTemperatureMonitor:
             
             if enso_state == "el_nino":
                 direction = "short"
-                confidence = min(100, 60 + abs(current_data["sst_anomaly"]) * 15)
+                confidence = min(100, 50 + abs(current_data["sst_anomaly"]) * 15)
                 rationale = f"El Niño conditions detected. SST anomaly {current_data['sst_anomaly']:+.2f}°C. Impact: Drought risk in Australia/Asia, wet in South America."
             elif enso_state == "la_nina":
                 direction = "long"
-                confidence = min(100, 60 + abs(current_data["sst_anomaly"]) * 15)
+                confidence = min(100, 50 + abs(current_data["sst_anomaly"]) * 15)
                 rationale = f"La Niña conditions detected. SST anomaly {current_data['sst_anomaly']:+.2f}°C. Impact: Wet in Australia/Asia, dry in South America."
             else:
                 direction = "neutral"
@@ -400,18 +403,19 @@ class SeaSurfaceTemperatureMonitor:
         elif region_type == "hurricane_zone":
             # Hurricane season signals
             thermal_stress = current_data["thermal_stress"]
+            sst_anomaly = current_data["sst_anomaly"]
             
             if thermal_stress == "high":
                 direction = "short"
-                confidence = 75
+                confidence = min(100, 50 + abs(sst_anomaly) * 15)
                 rationale = f"High thermal stress. SST {current_data['sst_celsius']:.1f}°C. Elevated hurricane risk for energy infrastructure."
             elif thermal_stress == "moderate":
                 direction = "neutral"
-                confidence = 50
+                confidence = min(100, 50 + abs(sst_anomaly) * 15)
                 rationale = f"Moderate thermal stress. SST {current_data['sst_celsius']:.1f}°C. Normal hurricane season conditions."
             else:
                 direction = "neutral"
-                confidence = 50
+                confidence = min(100, 50 + abs(sst_anomaly) * 15)
                 rationale = f"Low thermal stress. SST {current_data['sst_celsius']:.1f}°C. Below-average hurricane risk."
         
         elif region_type == "agricultural_impact":
@@ -420,11 +424,11 @@ class SeaSurfaceTemperatureMonitor:
             
             if sst_anomaly_val > 1.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Warm SST anomaly {sst_anomaly_val:+.2f}°C. Enhanced moisture transport, favorable for agriculture."
             elif sst_anomaly_val < -1.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Cold SST anomaly {sst_anomaly_val:+.2f}°C. Reduced moisture transport, drought risk."
             else:
                 direction = "neutral"
@@ -437,11 +441,11 @@ class SeaSurfaceTemperatureMonitor:
             
             if sst_anomaly_val > 1.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Warm SST {sst_anomaly_val:+.2f}°C. Enhanced monsoon activity, favorable for crops."
             elif sst_anomaly_val < -1.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Cold SST {sst_anomaly_val:+.2f}°C. Weak monsoon, drought risk."
             else:
                 direction = "neutral"
@@ -454,11 +458,11 @@ class SeaSurfaceTemperatureMonitor:
             
             if sst_anomaly_val > 2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Warm SST {sst_anomaly_val:+.2f}°C. Unfavorable for cold-water fisheries."
             elif sst_anomaly_val < -2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(sst_anomaly_val) * 10)
+                confidence = min(100, 50 + abs(sst_anomaly_val) * 10)
                 rationale = f"Cold SST {sst_anomaly_val:+.2f}°C. Favorable for cold-water fisheries."
             else:
                 direction = "neutral"
@@ -469,11 +473,11 @@ class SeaSurfaceTemperatureMonitor:
             # Default logic
             if combined_z > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"SST significantly above baseline."
             elif combined_z < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(combined_z) * 10)
+                confidence = min(100, 50 + abs(combined_z) * 12)
                 rationale = f"SST significantly below baseline."
             else:
                 direction = "neutral"
@@ -489,7 +493,8 @@ class SeaSurfaceTemperatureMonitor:
             "signal_type": "sea_surface_temperature",
             "direction": direction,
             "trade_direction": "neutral",  # SST is context only - trade direction from NDVI/precipitation
-            "confidence": confidence,  # SST confidence no longer capped — preserves dynamic range
+            "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_sst": current_data["sst_celsius"],

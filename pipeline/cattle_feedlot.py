@@ -234,7 +234,7 @@ class CattleFeedlotMonitor:
                 f"Cattle market neutral. Feedlot thermal: {avg_thermal:.1f}%, "
                 f"Pasture NDVI: {avg_pasture_ndvi:.3f}. No strong directional signal."
             )
-            confidence = max(MIN_CONFIDENCE, confidence // 2)
+            confidence = max(MIN_CONFIDENCE, confidence / 2)
 
         # Per-region signals
         for region_id, result in thermal_results.items():
@@ -246,7 +246,7 @@ class CattleFeedlotMonitor:
             region_direction = "long" if anomaly > REGION_ANOMALY_DIRECTION_THRESHOLD else "short" if anomaly < -REGION_ANOMALY_DIRECTION_THRESHOLD else "neutral"
 
             if region_direction == "neutral":
-                region_confidence = max(10, region_confidence // 2)
+                region_confidence = max(10, region_confidence / 2)
 
             signal = {
                 "region_id": f"usa_{region_id}_cattle",

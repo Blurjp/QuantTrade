@@ -22,6 +22,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
 
 class SoilMoistureMonitor:
     """Monitor soil moisture for commodity trading signals."""
@@ -431,9 +433,9 @@ class SoilMoistureMonitor:
         
         if status in ["severe_drought", "drought"]:
             direction = "short"
-            confidence = min(100, 65 + current_data["impact_score"] * 0.5)
+            confidence = min(100, 50 + current_data["impact_score"] * 0.5)
             if is_critical:
-                confidence = min(100, confidence * 1.2)
+                confidence = min(100, confidence + 10)
             rationale = f"Severe soil moisture deficit in {region['name']}. {current_data['moisture_anomaly_pct']:.1f}% below normal. Crop stress likely."
         
         elif status == "dry":
@@ -453,7 +455,7 @@ class SoilMoistureMonitor:
         
         elif status == "optimal":
             direction = "long"
-            confidence = min(100, 58 + abs(current_data["moisture_anomaly_pct"]) * 0.5)
+            confidence = min(100, 50 + abs(current_data["moisture_anomaly_pct"]) * 0.5)
             rationale = f"Optimal soil moisture in {region['name']}. {current_data['moisture_anomaly_pct']:+.1f}% from normal. Excellent growing conditions."
         
         elif status == "normal":
@@ -473,7 +475,7 @@ class SoilMoistureMonitor:
         
         elif status == "waterlogged":
             direction = "short"
-            confidence = min(100, 60 + abs(current_data["moisture_anomaly_pct"]) * 0.3)
+            confidence = min(100, 50 + abs(current_data["moisture_anomaly_pct"]) * 0.3)
             rationale = f"Waterlogged soil in {region['name']}. {current_data['moisture_anomaly_pct']:+.1f}% above normal. Root damage risk."
         
         else:
@@ -490,6 +492,7 @@ class SoilMoistureMonitor:
             "signal_type": "soil_moisture",
             "direction": direction,
             "confidence": round(confidence, 1),
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "surface_moisture": current_data["surface_moisture"],

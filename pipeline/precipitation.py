@@ -27,18 +27,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def _confidence_label(score: float) -> str:
-    # Convert to 0-1 scale if needed (assuming input might be 0-100)
-    if score > 1.0:
-        score = score / 100.0
-    
-    if pd.isna(score):
-        return "Unknown"
-    if score >= 0.75:
-        return "High"
-    if score >= 0.55:
-        return "Medium"
-    return "Low"
+from pipeline.confidence_utils import confidence_label as _confidence_label
 
 
 class PrecipitationMonitor:
@@ -487,9 +476,9 @@ class PrecipitationMonitor:
         return {
             "precip_z_score": round(precip_z, 2),
             "precip_anomaly": precip_anomaly,
-            "precip_deviation_pct": round((current_data["monthly_precip_estimate_mm"] - 
-                                          baseline["precipitation"]["mean"]) / 
-                                          baseline["precipitation"]["mean"] * 100, 2),
+            "precip_deviation_pct": round((current_data["monthly_precip_estimate_mm"] -
+                                          baseline["precipitation"]["mean"]) /
+                                          (baseline["precipitation"]["mean"] or 1e-10) * 100, 2),
             "combined_z_score": round(abs(precip_z), 2),
             "overall_anomaly": "significant" if abs(precip_z) > 2.0 else \
                               "moderate" if abs(precip_z) > 1.5 else "none"
@@ -546,7 +535,7 @@ class PrecipitationMonitor:
             direction = "long"
             confidence = min(100, 60 + current_data["impact_score"] * 0.5)
             if is_critical:
-                confidence = min(100, confidence * 1.2)
+                confidence = min(100, confidence + 10)
             rationale = f"Drought conditions in {region['name']}. Precipitation {current_data['precip_anomaly_pct']:.1f}% below normal. Supply at risk, bullish for prices."
         
         elif status == "dry":
@@ -576,10 +565,10 @@ class PrecipitationMonitor:
                 confidence = 50
                 rationale = f"Slightly wet conditions. Normal supply expectations."
         
-        # Normal = good growing conditions = good supply = bearish = SHORT
+        # Normal = good growing conditions = good supply = NEUTRAL
         else:  # normal
-            direction = "short"
-            confidence = 55
+            direction = "neutral"
+            confidence = 50
             rationale = f"Normal precipitation levels in {region['name']}. {current_data['precip_anomaly_pct']:+.1f}% from baseline. Good growing conditions, bearish for prices."
         
         confidence = round(confidence, 1)

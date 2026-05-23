@@ -25,18 +25,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-def _confidence_label(score: float) -> str:
-    # Convert to 0-1 scale if needed (assuming input might be 0-100)
-    if score > 1.0:
-        score = score / 100.0
-    
-    if pd.isna(score):
-        return "Unknown"
-    if score >= 0.75:
-        return "High"
-    if score >= 0.55:
-        return "Medium"
-    return "Low"
+from pipeline.confidence_utils import confidence_label as _confidence_label
 
 
 def _load_cattle_vegetation_regions() -> Dict:
@@ -642,15 +631,15 @@ class VegetationHealthMonitor:
             # Stress = supply shortage = bullish prices = LONG
             if status in ["severe_stress", "stress"]:
                 direction = "long"
-                confidence = min(100, 60 + current_data["impact_score"] * 0.5)
+                confidence = min(100, 50 + current_data["impact_score"] * 0.5)
                 if is_critical:
-                    confidence = min(100, confidence * 1.2)
+                    confidence = min(100, confidence + 10)
                 rationale = f"Vegetation stress in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Supply at risk, bullish for prices."
             
             elif status == "slight_stress":
                 if is_critical:
                     direction = "long"
-                    confidence = 60
+                    confidence = 55
                     rationale = f"Slight vegetation stress during critical period. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Mild bullish signal."
                 else:
                     direction = "neutral"
@@ -660,13 +649,13 @@ class VegetationHealthMonitor:
             # Excellent = good supply = bearish prices = SHORT
             elif status == "excellent":
                 direction = "short"
-                confidence = min(100, 60 + abs(current_data["ndvi_anomaly_pct"]) * 0.8)
+                confidence = min(100, 50 + abs(current_data["ndvi_anomaly_pct"]) * 0.8)
                 rationale = f"Excellent vegetation health in {region['name']}. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Strong supply, bearish for prices."
             
             elif status == "good":
                 if is_critical:
                     direction = "short"
-                    confidence = 58
+                    confidence = 53
                     rationale = f"Good vegetation conditions during critical period. Favorable for yields, mildly bearish."
                 else:
                     direction = "neutral"
@@ -683,13 +672,13 @@ class VegetationHealthMonitor:
             # Stress = supply shortage = bullish = LONG
             if status in ["severe_stress", "stress"]:
                 direction = "long"
-                confidence = min(100, 55 + current_data["impact_score"] * 0.3)
+                confidence = min(100, 50 + current_data["impact_score"] * 0.3)
                 rationale = f"Forest stress detected in {region['name']}. NDVI {current_data['ndvi_anomaly_pct']:.1f}% below normal. Timber/pulp supply concern, bullish for prices."
             
             # Excellent = good supply = bearish = SHORT
             elif status == "excellent":
                 direction = "short"
-                confidence = 58
+                confidence = 53
                 rationale = f"Excellent forest health. NDVI +{abs(current_data['ndvi_anomaly_pct']):.1f}% above normal. Strong supply, bearish for prices."
             
             else:
@@ -701,11 +690,11 @@ class VegetationHealthMonitor:
             # Default logic
             if anomaly["combined_z_score"] > 2.0:
                 direction = "long"
-                confidence = min(100, 60 + abs(anomaly["combined_z_score"]) * 10)
+                confidence = min(100, 50 + abs(anomaly["combined_z_score"]) * 12)
                 rationale = f"Vegetation health significantly above baseline."
             elif anomaly["combined_z_score"] < -2.0:
                 direction = "short"
-                confidence = min(100, 60 + abs(anomaly["combined_z_score"]) * 10)
+                confidence = min(100, 50 + abs(anomaly["combined_z_score"]) * 12)
                 rationale = f"Vegetation health significantly below baseline."
             else:
                 direction = "neutral"
@@ -716,8 +705,8 @@ class VegetationHealthMonitor:
         is_real_data = bool(current_data.get("is_real_data", False))
         confidence_penalty = 0
         if not is_real_data:
-            confidence = round(max(35.0, confidence * 0.7), 1)
-            confidence_penalty = 30
+            confidence = round(max(35.0, confidence - 15), 1)
+            confidence_penalty = 15
 
         signal = {
             "region_id": region_id,

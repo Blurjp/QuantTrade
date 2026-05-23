@@ -13,18 +13,7 @@ from pipeline.precipitation import PrecipitationMonitor
 from pipeline.vegetation_health import VegetationHealthMonitor
 
 
-def _confidence_label(score: float) -> str:
-    # Convert to 0-1 scale if needed (assuming input might be 0-100)
-    if score > 1.0:
-        score = score / 100.0
-    
-    if pd.isna(score):
-        return "Low"  # Default to Low for consistency
-    if score >= 0.75:
-        return "High"
-    if score >= 0.55:
-        return "Medium"
-    return "Low"
+from pipeline.confidence_utils import confidence_label as _confidence_label
 
 
 def _direction_to_vote(direction: str) -> int:

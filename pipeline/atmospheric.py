@@ -28,6 +28,9 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+from pipeline.confidence_utils import confidence_label as _confidence_label
+
+
 class AtmosphericMonitor:
     """Monitor industrial activity using atmospheric gas satellite data."""
     
@@ -673,11 +676,11 @@ class AtmosphericMonitor:
         
         if combined_z > 2.0:
             direction = "long"
-            confidence = min(100, 60 + abs(combined_z) * 10)
+            confidence = min(100, 50 + abs(combined_z) * 12)
             rationale = f"Industrial emissions {anomaly['no2_deviation_pct']:+.1f}% above baseline. Production activity significantly increased."
         elif combined_z < -2.0:
             direction = "short"
-            confidence = min(100, 60 + abs(combined_z) * 10)
+            confidence = min(100, 50 + abs(combined_z) * 12)
             rationale = f"Industrial emissions {anomaly['no2_deviation_pct']:+.1f}% below baseline. Production activity significantly decreased."
         else:
             direction = "neutral"
@@ -693,6 +696,7 @@ class AtmosphericMonitor:
             "signal_type": "atmospheric",
             "direction": direction,
             "confidence": confidence,
+            "confidence_label": _confidence_label(confidence),
             "rationale": rationale,
             "instruments": region["instruments"],
             "current_no2": current_data["no2_concentration"],

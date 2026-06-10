@@ -1355,8 +1355,357 @@ def ensure_backfill_data(output_base: str = "outputs") -> bool:
     return created_count > 0
 
 
+# ── Auto-trade constants ────────────────────────────────────────────
+AUTO_TRADE_CONFIDENCE_THRESHOLD = 88   # only trade signals ≥ 88%
+AUTO_TRADE_MAX_NEW_PER_CYCLE = 3       # max new trades per 15-min cycle
+AUTO_TRADE_MAX_TOTAL_POSITIONS = 10    # max total open positions
+AUTO_TRADE_POSITION_SIZE_PCT = 0.08    # 8% of equity per trade
+AUTO_TRADE_STOP_LOSS_PCT = 0.05        # 5% stop-loss
+AUTO_TRADE_TAKE_PROFIT_PCT = 0.10      # 10% take-profit
+
+
+def _auto_trade_fetch_price(ticker: str) -> float | None:
+    """Fetch latest price via yfinance. Returns None on failure."""
+    import yfinance as yf
+    try:
+        hist = yf.Ticker(ticker).history(period="1d")
+        if hist.empty:
+            logger.warning("[auto_trade] No price history for %s", ticker)
+            return None
+        return float(hist["Close"].iloc[-1])
+    except Exception as e:
+        logger.warning("[auto_trade] Price fetch failed for %s: %s", ticker, e)
+        return None
+
+
+def _auto_trade_get_alpaca_positions() -> set[str]:
+    """Return the set of symbols currently held in Alpaca paper account."""
+    import requests as _req
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        logger.debug("[auto_trade] No Alpaca creds, skipping Alpaca position check")
+        return set()
+    try:
+        resp = _req.get(
+            "https://paper-api.alpaca.markets/v2/positions",
+            headers={
+                "APCA-API-KEY-ID": key,
+                "APCA-API-SECRET-KEY": secret,
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return {p["symbol"] for p in resp.json()}
+    except Exception as e:
+        logger.warning("[auto_trade] Alpaca position fetch failed: %s", e)
+        return set()
+
+
+def _auto_trade_submit_order(ticker: str, qty: float, side: str) -> dict | None:
+    """Submit a GTC market order to Alpaca paper API. Returns order dict or None."""
+    import requests as _req
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        logger.error("[auto_trade] Missing Alpaca credentials, cannot submit order")
+        return None
+    payload = {
+        "symbol": ticker,
+        "qty": str(round(qty, 6)),
+        "side": side,
+        "type": "market",
+        "time_in_force": "gtc",
+    }
+    try:
+        resp = _req.post(
+            "https://paper-api.alpaca.markets/v2/orders",
+            json=payload,
+            headers={
+                "APCA-API-KEY-ID": key,
+                "APCA-API-SECRET-KEY": secret,
+                "Content-Type": "application/json",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        order = resp.json()
+        logger.info("[auto_trade] Order submitted OK: id=%s symbol=%s side=%s qty=%s",
+                     order.get("id"), ticker, side, qty)
+        return order
+    except Exception as e:
+        # Try to extract response body for debug
+        resp_text = ""
+        resp_obj = getattr(e, "response", None)
+        if resp_obj is not None and hasattr(resp_obj, "text"):
+            resp_text = resp_obj.text[:300]
+        logger.error("[auto_trade] Order submit failed for %s: %s — body: %s",
+                     ticker, e, resp_text)
+        return None
+
+
+def _auto_trade_region_to_ticker(region_id: str, signal_type: str) -> str | None:
+    """Map a region_id (and optionally signal_type) to a tradeable ticker.
+
+    Uses the same mapping as cron_auto_trade.py.
+    """
+    ticker_map = {
+        # Energy / Oil
+        "hormuz": "USO", "suez": "USO", "malacca": "USO", "cushing": "USO",
+        "gulf_mexico": "USO", "la_longbeach": "USO", "panama_canal": "USO",
+        "global_oil_meta": "USO", "atlantic_hurricane": "USO",
+        "refinery": "XLE", "permian": "XLE", "middle_east_oil": "XLE",
+        "power_plant": "XLU",
+        # Agriculture
+        "corn": "CORN", "soy": "SOYB", "wheat": "WEAT", "cotton": "BAL",
+        "cocoa": "NIB", "argentina_pampas": "DBA", "brazil": "SOYB",
+        "great_plains": "DBA", "midwest": "DBA", "corn_belt": "CORN",
+        "flint_hills": "CORN", "sandhills": "CORN",
+        # Retail
+        "walmart": "WMT", "costco": "COST", "retail": "XRT",
+        # Auto
+        "detroit": "CARZ", "auto": "CARZ",
+        # Industrial
+        "steel": "X", "semiconductor": "SMH",
+        # China / EM
+        "china": "FXI", "india": "INDA",
+        # Climate / El Nino
+        "nino": "DBA", "peru": "EPU", "benguela": "DBA",
+        "pacific_warm": "DBA", "indian_ocean": "DBA",
+        # Solar / Energy
+        "solar": "TAN", "datacenter": "SMH",
+    }
+    region_lower = (region_id or "").lower()
+    # Try longest-key match first for specificity
+    for key, ticker in sorted(ticker_map.items(), key=lambda x: -len(x[0])):
+        if key in region_lower:
+            return ticker
+    # Fallback: signal_type based
+    st = (signal_type or "").lower()
+    if "oil" in st or "energy" in st:
+        return "USO"
+    if "precip" in st or "soil" in st or "vegetation" in st:
+        return "DBA"
+    if "thermal" in st:
+        return "XLE"
+    if "solar" in st:
+        return "TAN"
+    if "nighttime" in st:
+        return "FXI"
+    return None
+
+
+def auto_trade_signals(output_dir: Path, portfolio) -> int:
+    """Read latest signals, filter by confidence ≥ 88%, and open positions via Alpaca.
+
+    Returns the number of new trades placed this cycle.
+    """
+    import glob as _glob
+
+    from datetime import date as _date
+
+    logger.info("[auto_trade] ── Auto-trade step started ──")
+
+    # ── 1. Gather today's signal files ──────────────────────────────
+    today_str = _date.today().isoformat()
+    pattern = str(output_dir / f"**/signal_*_{today_str}.json")
+    signal_files = sorted(_glob.glob(pattern, recursive=True))
+    logger.info("[auto_trade] Found %d signal file(s) matching '%s'",
+                len(signal_files), pattern)
+
+    signals: list[dict] = []
+    for sf in signal_files:
+        try:
+            data = json.loads(Path(sf).read_text())
+        except Exception as e:
+            logger.debug("[auto_trade] Skipping unreadable file %s: %s", sf, e)
+            continue
+        if not isinstance(data, dict):
+            continue
+        direction = (data.get("direction") or "").lower()
+        confidence = float(data.get("confidence", 0))
+        region_id = data.get("region_id", "")
+        signal_type = data.get("signal_type", "")
+        if direction not in ("long", "short"):
+            continue
+        if confidence < AUTO_TRADE_CONFIDENCE_THRESHOLD:
+            logger.debug("[auto_trade] Signal %s confidence %.1f < %d threshold, skipped",
+                         region_id, confidence, AUTO_TRADE_CONFIDENCE_THRESHOLD)
+            continue
+        data["_direction"] = direction
+        data["_confidence"] = confidence
+        data["_region_id"] = region_id
+        data["_signal_type"] = signal_type
+        signals.append(data)
+
+    signals.sort(key=lambda s: s["_confidence"], reverse=True)
+    logger.info("[auto_trade] %d signal(s) above %d%% confidence threshold",
+                len(signals), AUTO_TRADE_CONFIDENCE_THRESHOLD)
+
+    if not signals:
+        logger.info("[auto_trade] No qualifying signals — nothing to trade")
+        return 0
+
+    # ── 2. Determine which tickers are already held ─────────────────
+    portfolio_tickers: set[str] = set()
+    try:
+        if hasattr(portfolio, "positions"):
+            portfolio_tickers = {
+                p.ticker if hasattr(p, "ticker") else str(k)
+                for k, p in (portfolio.positions.items() if isinstance(portfolio.positions, dict) else enumerate(portfolio.positions))
+            }
+    except Exception:
+        logger.debug("[auto_trade] Could not read portfolio.positions")
+
+    alpaca_tickers = _auto_trade_get_alpaca_positions()
+    held_tickers = portfolio_tickers | alpaca_tickers
+    logger.info("[auto_trade] Already-held tickers: portfolio=%s alpaca=%s → %s",
+                portfolio_tickers, alpaca_tickers, held_tickers)
+
+    total_open = len(held_tickers)
+    if total_open >= AUTO_TRADE_MAX_TOTAL_POSITIONS:
+        logger.info("[auto_trade] Already at max positions (%d ≥ %d). Skipping.",
+                     total_open, AUTO_TRADE_MAX_TOTAL_POSITIONS)
+        return 0
+
+    # ── 3. Determine account equity for sizing ──────────────────────
+    equity: float = 10000.0  # default
+    try:
+        if hasattr(portfolio, "cash") and hasattr(portfolio, "positions"):
+            pos_value = sum(
+                getattr(p, "position_value", 0) if hasattr(p, "position_value")
+                else p.get("position_value", 0) if isinstance(p, dict)
+                else 0
+                for p in (portfolio.positions.values() if isinstance(portfolio.positions, dict) else portfolio.positions)
+            )
+            equity = float(portfolio.cash) + float(pos_value)
+    except Exception as e:
+        logger.warning("[auto_trade] Equity calc fallback to $10k: %s", e)
+
+    logger.info("[auto_trade] Account equity: $%.2f | Position size (8%%): $%.2f",
+                equity, equity * AUTO_TRADE_POSITION_SIZE_PCT)
+
+    # ── 4. Iterate signals and place trades ─────────────────────────
+    trades_placed = 0
+    seen_tickers: set[str] = set()
+
+    for sig in signals:
+        if trades_placed >= AUTO_TRADE_MAX_NEW_PER_CYCLE:
+            logger.info("[auto_trade] Hit max %d new trades/cycle — stopping",
+                        AUTO_TRADE_MAX_NEW_PER_CYCLE)
+            break
+        remaining = AUTO_TRADE_MAX_TOTAL_POSITIONS - total_open - trades_placed
+        if remaining <= 0:
+            logger.info("[auto_trade] Max total positions reached — stopping")
+            break
+
+        ticker = _auto_trade_region_to_ticker(sig["_region_id"], sig["_signal_type"])
+        if ticker is None:
+            logger.debug("[auto_trade] No ticker mapping for region=%s type=%s, skipped",
+                         sig["_region_id"], sig["_signal_type"])
+            continue
+
+        if ticker in seen_tickers:
+            continue
+        seen_tickers.add(ticker)
+
+        if ticker in held_tickers:
+            logger.info("[auto_trade] %s already held — skipping", ticker)
+            continue
+
+        # Fetch live price
+        price = _auto_trade_fetch_price(ticker)
+        if price is None or price <= 0:
+            logger.warning("[auto_trade] No valid price for %s — skipping", ticker)
+            continue
+
+        direction = sig["_direction"]
+        side = "buy" if direction == "long" else "sell"
+        position_value = equity * AUTO_TRADE_POSITION_SIZE_PCT
+        qty = position_value / price
+
+        if qty < 1:
+            # Fractional shares OK on Alpaca; but log if very small
+            logger.debug("[auto_trade] Fractional qty %.4f for %s", qty, ticker)
+
+        logger.info("[auto_trade] Placing %s %s | qty=%.4f @ ~$%.2f | value=$%.2f | conf=%.1f%%",
+                     side.upper(), ticker, qty, price, position_value, sig["_confidence"])
+
+        order = _auto_trade_submit_order(ticker, qty, side)
+        if order is None:
+            logger.warning("[auto_trade] Order failed for %s — continuing", ticker)
+            continue
+
+        # Also register in local portfolio so we don't double-trade
+        try:
+            if hasattr(portfolio, "positions"):
+                entry_price = price
+                sl_price = round(price * (1 - AUTO_TRADE_STOP_LOSS_PCT), 2) if direction == "long" \
+                    else round(price * (1 + AUTO_TRADE_STOP_LOSS_PCT), 2)
+                tp_price = round(price * (1 + AUTO_TRADE_TAKE_PROFIT_PCT), 2) if direction == "long" \
+                    else round(price * (1 - AUTO_TRADE_TAKE_PROFIT_PCT), 2)
+
+                pos_dict = {
+                    "ticker": ticker,
+                    "direction": direction,
+                    "quantity": qty,
+                    "entry_price": entry_price,
+                    "position_value": position_value,
+                    "stop_loss": sl_price,
+                    "take_profit": tp_price,
+                    "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                    "rationale": f"[{sig.get('_signal_type', '')}] conf={sig['_confidence']:.0f}%",
+                    "region_id": sig.get("_region_id", ""),
+                    "asset_class": sig.get("asset_class", "etf"),
+                    "unrealized_pnl": 0,
+                    "alpaca_order_id": order.get("id", ""),
+                }
+
+                if isinstance(portfolio.positions, dict):
+                    portfolio.positions[ticker] = type("Position", (), pos_dict)() if not hasattr(list(portfolio.positions.values())[0] if portfolio.positions else None, "__dict__") else None
+                    # Simpler: just store as dict entry
+                    portfolio.positions[ticker] = pos_dict
+                    logger.debug("[auto_trade] Added %s to portfolio.positions (dict)", ticker)
+
+                # Deduct cash
+                if hasattr(portfolio, "cash"):
+                    portfolio.cash = float(portfolio.cash) - position_value
+                    logger.debug("[auto_trade] Cash after trade: $%.2f", portfolio.cash)
+
+                # Record trade if portfolio supports it
+                if hasattr(portfolio, "trades"):
+                    portfolio.trades.append({
+                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "ticker": ticker,
+                        "action": f"OPEN_{direction.upper()}",
+                        "price": price,
+                        "quantity": qty,
+                        "value": position_value,
+                        "rationale": f"[auto_trade] conf={sig['_confidence']:.0f}%",
+                    })
+
+                # Persist portfolio to disk
+                if hasattr(portfolio, "save"):
+                    portfolio.save()
+                    logger.debug("[auto_trade] Portfolio saved to disk")
+
+        except Exception as e:
+            logger.warning("[auto_trade] Failed to update local portfolio for %s: %s", ticker, e)
+
+        trades_placed += 1
+        held_tickers.add(ticker)
+
+        logger.info("[auto_trade] ✅ Trade #%d: %s %s %.4f shares @ $%.2f | SL=$%.2f TP=$%.2f",
+                     trades_placed, side.upper(), ticker, qty, price,
+                     round(price * (1 - AUTO_TRADE_STOP_LOSS_PCT) if direction == "long" else price * (1 + AUTO_TRADE_STOP_LOSS_PCT), 2),
+                     round(price * (1 + AUTO_TRADE_TAKE_PROFIT_PCT) if direction == "long" else price * (1 - AUTO_TRADE_TAKE_PROFIT_PCT), 2))
+
+    logger.info("[auto_trade] ── Done: %d new trade(s) placed this cycle ──", trades_placed)
+    return trades_placed
+
+
 def run_paper_trading_cycle():
-    """Full paper trading cycle: risk check, auto-trade, reconcile, Discord report.
+    """Full paper trading cycle: risk check, pipeline, auto-trade, reconcile, Discord report.
     Only runs during US market hours (9:30am-4pm ET, Mon-Fri).
     """
     # Market hours check: 9:30 AM - 4:00 PM ET, Monday-Friday
@@ -1394,6 +1743,13 @@ def run_paper_trading_cycle():
     if should_run_pipeline:
         logger.info("Running satellite pipeline (data stale or missing)")
         run_daily_pipeline()
+
+    # 2b. Auto-trade: read latest signals, filter ≥88% confidence, open positions
+    try:
+        new_trades = auto_trade_signals(output_dir, portfolio)
+        logger.info("Auto-trade step completed: %d new trade(s)", new_trades)
+    except Exception as e:
+        logger.error("Auto-trade step failed: %s", e, exc_info=True)
 
     # 3. Reconcile orders + sync portfolio from Alpaca
     try:
